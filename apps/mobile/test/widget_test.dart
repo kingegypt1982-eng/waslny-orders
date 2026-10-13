@@ -1,0 +1,360 @@
+// This is a basic Flutter widget test.
+//
+// To perform an interaction with a widget in your test, use the WidgetTester
+// utility in the flutter_test package. For example, you can send tap and scroll
+// gestures. You can also use WidgetTester to find child widgets in the widget
+// tree, read text, and verify that the values of widget properties are correct.
+
+import 'dart:convert';
+
+import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:wasalny_orders/app.dart';
+import 'package:wasalny_orders/core/api_client.dart';
+import 'package:wasalny_orders/screens/home_screen.dart';
+import 'package:wasalny_orders/screens/register_screen.dart';
+
+void main() {
+  testWidgets('choosing client opens registration with client role', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [preferencesProvider.overrideWithValue(preferences)],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider);
+    router.go('/');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('عميل'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Join Wasalny'), findsOneWidget);
+    expect(find.text('Client'), findsOneWidget);
+    expect(
+      tester.widget<RegisterScreen>(find.byType(RegisterScreen)).initialRole,
+      AccountType.client,
+    );
+
+    router.pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('مندوب'));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<RegisterScreen>(find.byType(RegisterScreen)).initialRole,
+      AccountType.captain,
+    );
+  });
+
+  testWidgets('registration switches languages and text direction', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: RegisterScreen(initialRole: AccountType.captain)),
+    );
+
+    expect(find.text('Join Wasalny'), findsOneWidget);
+    expect(find.text('Captain'), findsOneWidget);
+    final directionalityFinder = find.descendant(
+      of: find.byType(RegisterScreen),
+      matching: find.byType(Directionality),
+    );
+    expect(
+      tester.widget<Directionality>(directionalityFinder).textDirection,
+      TextDirection.ltr,
+    );
+
+    await tester.tap(find.text('العربية'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('انضم إلى وصلني'), findsOneWidget);
+    expect(find.text('أنشئ حسابك للبدء'), findsOneWidget);
+    expect(find.text('مندوب'), findsOneWidget);
+    expect(find.text('الاسم بالكامل'), findsOneWidget);
+    expect(find.text('رقم الهاتف للتواصل'), findsOneWidget);
+    expect(find.text('البريد الإلكتروني'), findsOneWidget);
+    expect(find.text('كلمة المرور'), findsOneWidget);
+    expect(find.text('إنشاء حساب'), findsOneWidget);
+    expect(find.text('لديك حساب؟ '), findsOneWidget);
+    expect(find.text('سجل الدخول'), findsOneWidget);
+    expect(
+      tester.widget<Directionality>(directionalityFinder).textDirection,
+      TextDirection.rtl,
+    );
+
+    await tester.tap(find.text('English'));
+    await tester.pumpAndSettle();
+    expect(find.text('Join Wasalny'), findsOneWidget);
+    expect(find.text('Captain'), findsOneWidget);
+  });
+
+  testWidgets('Arabic sign in link opens login with selected account role', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [preferencesProvider.overrideWithValue(preferences)],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider);
+    router.go('/register?role=CAPTAIN');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('العربية'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('سجل الدخول'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('سجل الدخول'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Welcome back'), findsOneWidget);
+    final location = router.routeInformationProvider.value.uri;
+    expect(location.path, '/auth');
+    expect(location.queryParameters['mode'], 'login');
+    expect(location.queryParameters['role'], 'CAPTAIN');
+  });
+
+  testWidgets('registration posts fields, saves session, and routes captain', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _TestApiClient(preferences);
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider);
+    router.go('/register?role=CAPTAIN');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), 'Captain User');
+    await tester.enterText(find.byType(TextFormField).at(1), '01012345678');
+    await tester.enterText(find.byType(TextFormField).at(3), 'ABC-123');
+    await tester.enterText(
+      find.byType(TextFormField).at(4),
+      'captain@example.com',
+    );
+    await tester.enterText(find.byType(TextFormField).at(5), 'Password123');
+    await tester.ensureVisible(find.text('Create account'));
+    await tester.tap(find.text('Create account'));
+    await tester.pumpAndSettle();
+
+    expect(api.requestPath, '/auth/register');
+    expect(api.requestBody, containsPair('name', 'Captain User'));
+    expect(api.requestBody, containsPair('phone', '01012345678'));
+    expect(api.requestBody, containsPair('email', 'captain@example.com'));
+    expect(api.requestBody, containsPair('password', 'Password123'));
+    expect(api.requestBody, containsPair('role', 'CAPTAIN'));
+    expect(api.requestBody, containsPair('vehicleType', 'Motorcycle'));
+    expect(api.requestBody, containsPair('vehiclePlate', 'ABC-123'));
+    expect(preferences.getString('access_token'), 'test-access-token');
+    expect(
+      jsonDecode(preferences.getString('session_user')!)['role'],
+      'CAPTAIN',
+    );
+    expect(
+      router.routeInformationProvider.value.uri.path,
+      '/captain-documents',
+    );
+  });
+
+  testWidgets('registration displays the API error message', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final requestOptions = RequestOptions(path: '/auth/register');
+    final api = _TestApiClient(
+      preferences,
+      error: DioException(
+        requestOptions: requestOptions,
+        response: Response(
+          requestOptions: requestOptions,
+          statusCode: 409,
+          data: {'message': 'Email is already registered'},
+        ),
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider);
+    router.go('/register');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), 'Client User');
+    await tester.enterText(find.byType(TextFormField).at(1), '01012345678');
+    await tester.enterText(
+      find.byType(TextFormField).at(2),
+      'client@example.com',
+    );
+    await tester.enterText(find.byType(TextFormField).at(3), 'Password123');
+    await tester.ensureVisible(find.text('Create account'));
+    await tester.tap(find.text('Create account'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Email is already registered'), findsOneWidget);
+    expect(router.routeInformationProvider.value.uri.path, '/register');
+  });
+
+  testWidgets('client registration routes to the home screen', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _TestApiClient(preferences, role: 'CLIENT');
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider);
+    router.go('/register?role=CLIENT');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), 'Client User');
+    await tester.enterText(find.byType(TextFormField).at(1), '01012345678');
+    await tester.enterText(
+      find.byType(TextFormField).at(2),
+      'client@example.com',
+    );
+    await tester.enterText(find.byType(TextFormField).at(3), 'Password123');
+    await tester.ensureVisible(find.text('Create account'));
+    await tester.tap(find.text('Create account'));
+    await tester.pumpAndSettle();
+
+    expect(router.routeInformationProvider.value.uri.path, '/');
+    expect(container.read(sessionProvider)?['role'], 'CLIENT');
+    expect(find.byType(WaslnyHomeScreen), findsOneWidget);
+    expect(find.text('كل احتياجاتك'), findsOneWidget);
+
+    await tester.tap(find.text('طلباتي'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      1,
+    );
+
+    await tester.tap(find.text('الملف'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      2,
+    );
+
+    await tester.tap(find.text('الرئيسية'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WaslnyHomeScreen), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.person_outline_rounded));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      2,
+    );
+  });
+
+  testWidgets('splash appears first, then signed-out users see welcome', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [preferencesProvider.overrideWithValue(preferences)],
+        child: const WasalnyApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Waslny Orders'), findsOneWidget);
+    expect(find.text('توصيل طلباتك بسهولة وأمان'), findsOneWidget);
+    expect(find.text('أورلان'), findsOneWidget);
+    expect(find.text('مبيعات'), findsNWidgets(2));
+    expect(find.text('مشتريات'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 2500));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your delivery,\nhandled.'), findsOneWidget);
+    expect(find.text('Create an account'), findsOneWidget);
+  });
+}
+
+class _TestApiClient extends ApiClient {
+  _TestApiClient(super.preferences, {this.error, this.role = 'CAPTAIN'});
+
+  final Object? error;
+  final String role;
+  String? requestPath;
+  Map<String, dynamic>? requestBody;
+
+  @override
+  Future<Map<String, dynamic>> post(String path, {Object? data}) async {
+    requestPath = path;
+    requestBody = Map<String, dynamic>.from(data! as Map);
+    if (error != null) throw error!;
+    return {
+      'accessToken': 'test-access-token',
+      'user': {
+        'id': 'captain-1',
+        'email': role == 'CLIENT'
+            ? 'client@example.com'
+            : 'captain@example.com',
+        'name': role == 'CLIENT' ? 'Client User' : 'Captain User',
+        'role': role,
+      },
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> getMap(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => {};
+}
