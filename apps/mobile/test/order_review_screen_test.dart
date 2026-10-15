@@ -23,7 +23,7 @@ void main() {
     expect(find.text('المطار'), findsOneWidget);
     expect(find.text('مشتريات'), findsOneWidget);
     expect(find.text('18.5 كم'), findsOneWidget);
-    expect(find.text('42.50 EGP'), findsNWidgets(2));
+    expect(find.text('42.50 ج.م'), findsNWidgets(2));
     expect(find.text('عمولة المندوب'), findsNothing);
     expect(
       find.text('تُخصم من محفظة المندوب ولا تضاف إلى إجمالي العميل'),

@@ -464,6 +464,58 @@ void main() {
     );
     expect(category.initialValue, 'FOOD');
   });
+
+  testWidgets('new order form is fully Arabic RTL', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(child: MaterialApp(home: CreateOrderScreen())),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widgetList<Directionality>(
+            find.ancestor(
+              of: find.text('مسار الشحنة'),
+              matching: find.byType(Directionality),
+            ),
+          )
+          .first
+          .textDirection,
+      TextDirection.rtl,
+    );
+    expect(find.text('طلب توصيل جديد'), findsOneWidget);
+    expect(find.text('مسار الشحنة'), findsOneWidget);
+    expect(find.text('الاستلام'), findsOneWidget);
+    expect(find.text('التسليم'), findsOneWidget);
+    expect(find.text('نوع الشحنة'), findsOneWidget);
+    expect(find.text('تفاصيل الشحنة'), findsOneWidget);
+    expect(find.text('بيانات المستلم'), findsOneWidget);
+    expect(find.text('اسم المستلم'), findsOneWidget);
+    expect(find.text('هاتف المستلم'), findsOneWidget);
+
+    // Default pickup label is real editable text, not a placeholder.
+    final fields = tester
+        .widgetList<TextFormField>(find.byType(TextFormField))
+        .toList();
+    expect(fields.first.controller?.text, 'القاهرة، مصر');
+
+    // Arabic category items.
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('إلكترونيات'), findsOneWidget);
+    expect(find.text('طعام ومشروبات'), findsOneWidget);
+    await tester.tap(find.text('إلكترونيات'));
+    await tester.pumpAndSettle();
+    expect(find.text('طعام ومشروبات'), findsNothing);
+
+    // Arabic validation messages on empty submit.
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('متابعة لمراجعة السعر'));
+    await tester.pump();
+    expect(find.text('هذا الحقل مطلوب'), findsWidgets);
+    expect(find.text('أدخل رقم تواصل صحيح'), findsOneWidget);
+  });
 }
 
 void _ignoreTab(int _) {}

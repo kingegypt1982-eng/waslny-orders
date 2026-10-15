@@ -147,9 +147,12 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
     return number?.toStringAsFixed(2) ?? '--';
   }
 
+  String _arCurrency(Object? currency) =>
+      currency?.toString() == 'EGP' ? 'ج.م' : '${currency ?? ''}';
+
   @override
   Widget build(BuildContext context) {
-    final currency = widget.quote['currency']?.toString() ?? '';
+    final currency = _arCurrency(widget.quote['currency']);
     final price = _amount(widget.quote['price']);
 
     return Directionality(

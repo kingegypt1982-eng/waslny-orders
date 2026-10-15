@@ -371,8 +371,7 @@ class _TMap extends StatelessWidget {
               ),
               children: [
                 TileLayer(
-                  urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.waslny.orders',
                 ),
                 MarkerLayer(
@@ -966,7 +965,8 @@ Map<String, dynamic>? _trackCaptain(Map<String, dynamic> order) {
   return captain;
 }
 
-LatLng? _tLatLng(Object? lat, Object? lon) {  final la = lat is num ? lat.toDouble() : double.tryParse('${lat ?? ''}');
+LatLng? _tLatLng(Object? lat, Object? lon) {
+  final la = lat is num ? lat.toDouble() : double.tryParse('${lat ?? ''}');
   final lo = lon is num ? lon.toDouble() : double.tryParse('${lon ?? ''}');
   if (la == null || lo == null) return null;
   return LatLng(la, lo);
@@ -977,7 +977,7 @@ double _tNum(Object? value) {
   return double.tryParse('${value ?? ''}') ?? 0;
 }
 
-String _tEgp(Object? value) => 'EGP ${_tNum(value).toStringAsFixed(2)}';
+String _tEgp(Object? value) => '${_tNum(value).toStringAsFixed(2)} ج.م';
 
 String _tDate(Object? value) {
   final dt = DateTime.tryParse('${value ?? ''}');

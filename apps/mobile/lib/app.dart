@@ -86,7 +86,7 @@ final routerProvider = Provider<GoRouter>(
       GoRoute(
         path: '/map-picker',
         builder: (context, state) => MapPickerScreen(
-          title: state.uri.queryParameters['title'] ?? 'Choose location',
+          title: state.uri.queryParameters['title'] ?? 'اختيار الموقع',
         ),
       ),
       GoRoute(

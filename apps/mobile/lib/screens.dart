@@ -1076,7 +1076,7 @@ class CreateOrderScreen extends ConsumerStatefulWidget {
 
 class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _pickupLabel = TextEditingController(text: 'Cairo, Egypt');
+  final _pickupLabel = TextEditingController(text: 'القاهرة، مصر');
   final _deliveryLabel = TextEditingController();
   final _description = TextEditingController();
   final _recipient = TextEditingController();
@@ -1117,20 +1117,33 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   }
 
   Future<void> _pick(bool pickup) async {
+    final title = pickup ? 'اختيار موقع الاستلام' : 'اختيار موقع التسليم';
     final result = await context.push<Map<String, dynamic>>(
-      '/map-picker?title=${pickup ? 'Choose pickup' : 'Choose delivery'}',
+      '/map-picker?title=${Uri.encodeComponent(title)}',
     );
     if (result == null || !mounted) return;
     final point = LatLng(result['lat'] as double, result['lon'] as double);
     setState(() {
       if (pickup) {
         _pickup = point;
-        _pickupLabel.text = 'Selected pickup location';
+        _applyPickedLabel(_pickupLabel, point);
       } else {
         _delivery = point;
-        _deliveryLabel.text = 'Selected delivery location';
+        _applyPickedLabel(_deliveryLabel, point);
       }
     });
+  }
+
+  /// Keeps what the user typed; fills a short coordinate label only when the
+  /// field is empty or still holds the default text. The API already stores
+  /// free-text labels (pickupLabel/deliveryLabel), so no schema change is
+  /// needed — a reverse-geocoder would be required for real street names.
+  void _applyPickedLabel(TextEditingController controller, LatLng point) {
+    final text = controller.text.trim();
+    if (text.isEmpty || text == 'Cairo, Egypt' || text == 'القاهرة، مصر') {
+      controller.text =
+          '${point.latitude.toStringAsFixed(4)}، ${point.longitude.toStringAsFixed(4)}';
+    }
   }
 
   Future<void> _calculate() async {
@@ -1178,128 +1191,131 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('New delivery'),
-      leading: IconButton(
-        onPressed: () => context.pop(),
-        icon: const Icon(Icons.arrow_back),
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('طلب توصيل جديد'),
+        leading: IconButton(
+          onPressed: () => context.pop(),
+          icon: const Icon(Icons.arrow_back),
+        ),
       ),
-    ),
-    body: SafeArea(
-      child: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(18, 5, 18, 24),
-          children: [
-            const Text(
-              'Shipment route',
-              style: TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
-                color: _ink,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _LocationField(
-              label: 'Pickup',
-              controller: _pickupLabel,
-              icon: Icons.trip_origin,
-              onMap: () => _pick(true),
-            ),
-            const SizedBox(height: 10),
-            _LocationField(
-              label: 'Deliver to',
-              controller: _deliveryLabel,
-              icon: Icons.location_on_outlined,
-              onMap: () => _pick(false),
-            ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              initialValue: _category,
-              decoration: const InputDecoration(
-                labelText: 'Shipment type',
-                prefixIcon: Icon(Icons.inventory_2_outlined),
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'PAPERS',
-                  child: Text('Papers & documents'),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(18, 5, 18, 24),
+            children: [
+              const Text(
+                'مسار الشحنة',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  color: _ink,
                 ),
-                DropdownMenuItem(value: 'MATERIALS', child: Text('Materials')),
-                DropdownMenuItem(value: 'GOODS', child: Text('Goods')),
-                DropdownMenuItem(value: 'PURCHASES', child: Text('Purchases')),
-                DropdownMenuItem(value: 'FOOD', child: Text('Food and drinks')),
-                DropdownMenuItem(value: 'MEDICINES', child: Text('Medicines')),
-                DropdownMenuItem(
-                  value: 'ELECTRONICS',
-                  child: Text('Electronics'),
+              ),
+              const SizedBox(height: 12),
+              _LocationField(
+                label: 'الاستلام',
+                controller: _pickupLabel,
+                icon: Icons.trip_origin,
+                onMap: () => _pick(true),
+              ),
+              const SizedBox(height: 10),
+              _LocationField(
+                label: 'التسليم',
+                controller: _deliveryLabel,
+                icon: Icons.location_on_outlined,
+                onMap: () => _pick(false),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: _category,
+                decoration: const InputDecoration(
+                  labelText: 'نوع الشحنة',
+                  prefixIcon: Icon(Icons.inventory_2_outlined),
                 ),
-                DropdownMenuItem(
-                  value: 'SPARE_PARTS',
-                  child: Text('Spare parts'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'PAPERS',
+                    child: Text('مستندات وأوراق'),
+                  ),
+                  DropdownMenuItem(value: 'MATERIALS', child: Text('مواد')),
+                  DropdownMenuItem(value: 'GOODS', child: Text('بضائع')),
+                  DropdownMenuItem(value: 'PURCHASES', child: Text('مشتريات')),
+                  DropdownMenuItem(value: 'FOOD', child: Text('طعام ومشروبات')),
+                  DropdownMenuItem(value: 'MEDICINES', child: Text('أدوية')),
+                  DropdownMenuItem(
+                    value: 'ELECTRONICS',
+                    child: Text('إلكترونيات'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'SPARE_PARTS',
+                    child: Text('قطع غيار'),
+                  ),
+                  DropdownMenuItem(value: 'PACKAGE', child: Text('طرد')),
+                  DropdownMenuItem(value: 'OTHER', child: Text('أخرى')),
+                ],
+                onChanged: (value) =>
+                    setState(() => _category = value ?? 'PACKAGE'),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _description,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'تفاصيل الشحنة',
+                  hintText: 'ماذا سيستلم المندوب؟ (اختياري)',
                 ),
-                DropdownMenuItem(value: 'PACKAGE', child: Text('Package')),
-                DropdownMenuItem(
-                  value: 'OTHER',
-                  child: Text('Other ready shipment'),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'بيانات المستلم',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: _ink,
                 ),
-              ],
-              onChanged: (value) =>
-                  setState(() => _category = value ?? 'PACKAGE'),
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _description,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Shipment details',
-                hintText: 'What is the captain picking up? (optional)',
               ),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              'Recipient details',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: _ink,
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _recipient,
+                decoration: const InputDecoration(
+                  labelText: 'اسم المستلم',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+                validator: _orderRequired,
               ),
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _recipient,
-              decoration: const InputDecoration(
-                labelText: 'Recipient name',
-                prefixIcon: Icon(Icons.person_outline),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'هاتف المستلم',
+                  prefixIcon: Icon(Icons.phone_outlined),
+                ),
+                validator: (value) => value != null && value.length >= 8
+                    ? null
+                    : 'أدخل رقم تواصل صحيح',
               ),
-              validator: _required,
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _phone,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Recipient phone',
-                prefixIcon: Icon(Icons.phone_outlined),
+              const SizedBox(height: 14),
+              const SizedBox(height: 8),
+              _PrimaryButton(
+                label: _busy ? 'جارٍ احتساب السعر…' : 'متابعة لمراجعة السعر',
+                busy: _busy,
+                onPressed: _busy ? null : _calculate,
               ),
-              validator: (value) => value != null && value.length >= 8
-                  ? null
-                  : 'Enter a contact number',
-            ),
-            const SizedBox(height: 14),
-            const SizedBox(height: 8),
-            _PrimaryButton(
-              label: _busy ? 'جارٍ احتساب السعر…' : 'متابعة لمراجعة السعر',
-              busy: _busy,
-              onPressed: _busy ? null : _calculate,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     ),
   );
 }
+
+String? _orderRequired(String? value) =>
+    value == null || value.trim().length < 2 ? 'هذا الحقل مطلوب' : null;
 
 class _LocationField extends StatelessWidget {
   const _LocationField({
@@ -1322,12 +1338,12 @@ class _LocationField extends StatelessWidget {
             labelText: label,
             prefixIcon: Icon(icon, size: 19),
           ),
-          validator: _required,
+          validator: _orderRequired,
         ),
       ),
       const SizedBox(width: 7),
       IconButton.filledTonal(
-        tooltip: 'Choose on map',
+        tooltip: 'اختيار من الخريطة',
         onPressed: onMap,
         icon: const Icon(Icons.map_outlined),
       ),
@@ -1519,7 +1535,7 @@ class _OrderCard extends StatelessWidget {
           ),
           const SizedBox(height: 9),
           Text(
-            'EGP ${order['price'] ?? '—'}',
+            _arEgp(order['price']),
             style: const TextStyle(color: _muted, fontSize: 11),
           ),
         ],
@@ -1914,6 +1930,13 @@ double _toDouble(Object? value) {
 }
 
 String _egp(Object? value) => 'EGP ${_toDouble(value).toStringAsFixed(2)}';
+
+/// Client-facing amount in Arabic pounds (history + other client screens).
+/// Captain wallet/cards intentionally keep "EGP".
+String _arEgp(Object? value) {
+  if (value == null) return '—';
+  return '${_toDouble(value).toStringAsFixed(2)} ج.م';
+}
 
 class _PrimaryButton extends StatelessWidget {
   const _PrimaryButton({
