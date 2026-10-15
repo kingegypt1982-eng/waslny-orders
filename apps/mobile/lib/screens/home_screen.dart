@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'notifications_screen.dart';
+
 class WaslnyHomeScreen extends StatefulWidget {
   const WaslnyHomeScreen({
     super.key,
@@ -189,14 +191,7 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
             ],
           ),
         ),
-        IconButton(
-          onPressed: () => showMessage('لا توجد إشعارات جديدة'),
-          icon: const Icon(
-            Icons.notifications_none_rounded,
-            color: Colors.white,
-            size: 27,
-          ),
-        ),
+        const NotificationBell(iconColor: Colors.white),
         Container(
           height: 43,
           width: 43,

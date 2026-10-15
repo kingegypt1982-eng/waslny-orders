@@ -340,8 +340,8 @@ export class AdminService {
         if (captainChanged || (input.status !== undefined && nextStatus !== currentStatus)) {
           await this.notifications.create(
             order.clientId,
-            'Order updated by support',
-            `Order ${order.reference} was updated: ${nextStatus.replaceAll('_', ' ').toLowerCase()}${newCaptainId ? ' (captain assigned)' : ''}.`,
+            'تحديث من الدعم',
+            `تم تحديث الطلب ${order.reference}: ${arabicAdminStatus(nextStatus)}${newCaptainId ? ' (تم تعيين مندوب)' : ''}.`,
             NotificationType.ORDER,
             { orderId },
           );
@@ -351,5 +351,19 @@ export class AdminService {
       }
       return updated;
     });
+  }
+}
+function arabicAdminStatus(status: OrderStatus) {
+  switch (status) {
+    case OrderStatus.PENDING: return 'قيد الانتظار';
+    case OrderStatus.SEARCHING_CAPTAIN: return 'جارٍ البحث عن مندوب';
+    case OrderStatus.ACCEPTED: return 'تم قبول الطلب';
+    case OrderStatus.ARRIVED_AT_PICKUP: return 'وصل المندوب إلى موقع الاستلام';
+    case OrderStatus.PICKED_UP: return 'تم استلام الشحنة';
+    case OrderStatus.ON_THE_WAY: return 'الشحنة في الطريق';
+    case OrderStatus.DELIVERED: return 'تم التسليم';
+    case OrderStatus.COMPLETED: return 'اكتمل الطلب';
+    case OrderStatus.CANCELLED: return 'ملغي';
+    default: return status;
   }
 }

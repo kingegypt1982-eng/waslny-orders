@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
 import 'screens.dart';
+import 'screens/notifications_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'screens/order_review_screen.dart';
 import 'screens/register_screen.dart';
@@ -97,6 +98,10 @@ final routerProvider = Provider<GoRouter>(
       GoRoute(
         path: '/wallet',
         builder: (context, state) => const WalletScreen(),
+      ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) => const NotificationsScreen(),
       ),
     ],
   ),

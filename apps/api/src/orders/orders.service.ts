@@ -191,7 +191,7 @@ export class OrdersService {
       return updated;
     });
     if (order) {
-      await this.notifyClient(order, 'Captain accepted your order', `A captain is on the way to pick up order ${order.reference}.`);
+      await this.notifyClient(order, 'تم قبول طلبك', `قبل المندوب الطلب ${order.reference} وهو في الطريق إلى موقع الاستلام.`);
     }
     return order;
   }
@@ -227,7 +227,7 @@ export class OrdersService {
       });
       return moved;
     });
-    await this.notifyClient(updated, 'Order update', `Order ${updated.reference} is now ${next.replaceAll('_', ' ').toLowerCase()}.`);
+    await this.notifyClient(updated, 'تحديث الطلب', `الطلب ${updated.reference}: ${arabicTripUpdate(next)}.`);
     return updated;
   }
 
@@ -293,7 +293,7 @@ export class OrdersService {
     const updated = await this.submitProof(
       orderId, captainId, ProofType.PICKUP, OrderStatus.PICKED_UP, 'Pickup proof submitted', photo, note,
     );
-    await this.notifyClient(updated, 'Shipment picked up', `Order ${updated.reference} was picked up by the captain.`);
+    await this.notifyClient(updated, 'تم استلام الشحنة', `استلم المندوب شحنة الطلب ${updated.reference} وهي في الطريق إليك.`);
     return updated;
   }
 
@@ -304,7 +304,7 @@ export class OrdersService {
     const updated = await this.submitProof(
       orderId, captainId, ProofType.DELIVERY, OrderStatus.DELIVERED, 'Delivery proof submitted', photo, note,
     );
-    await this.notifyClient(updated, 'Order delivered', `Order ${updated.reference} was delivered. Please confirm receipt.`);
+    await this.notifyClient(updated, 'تم تسليم الشحنة', `تم تسليم الطلب ${updated.reference}. يرجى تأكيد الاستلام.`);
     return updated;
   }
 
@@ -536,7 +536,7 @@ export class OrdersService {
       return released;
     });
     if (order) {
-      await this.notifyClient(order, 'Searching for a new captain', `The captain released order ${order.reference}. We are finding you a new one.`);
+      await this.notifyClient(order, 'جارٍ البحث عن مندوب جديد', `اعتذر المندوب عن الطلب ${order.reference}. نبحث لك عن مندوب آخر.`);
     }
     return order;
   }
@@ -605,6 +605,12 @@ const sensitiveCategories: ShipmentCategory[] = [
   ShipmentCategory.FOOD,
   ShipmentCategory.ELECTRONICS,
 ];
+
+function arabicTripUpdate(next: OrderStatus) {
+  if (next === OrderStatus.ARRIVED_AT_PICKUP) return 'وصل المندوب إلى موقع الاستلام';
+  if (next === OrderStatus.ON_THE_WAY) return 'الشحنة في الطريق إليك';
+  return next;
+}
 
 function isSensitiveCategory(category: ShipmentCategory) {
   return sensitiveCategories.includes(category);

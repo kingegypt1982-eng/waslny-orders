@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
 import 'screens/home_screen.dart';
+import 'screens/notifications_screen.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -517,10 +518,7 @@ class ClientHome extends ConsumerWidget {
                     onPressed: onToggleLanguage,
                     child: Text(isArabic ? 'English' : 'العربية'),
                   ),
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.notifications_none, color: _ink),
-                  ),
+                  const NotificationBell(iconColor: _ink, size: 24),
                 ],
               ),
               const SizedBox(height: 20),
