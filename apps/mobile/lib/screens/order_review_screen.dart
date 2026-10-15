@@ -24,12 +24,69 @@ class OrderReviewScreen extends ConsumerStatefulWidget {
 }
 
 class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
+  static const _sensitiveCategories = {
+    'MEDICINES',
+    'PURCHASES',
+    'FOOD',
+    'ELECTRONICS',
+  };
+
   bool _busy = false;
+  bool _ackChecked = false;
+  Map<String, dynamic>? _policy;
+  String? _policyError;
+
+  bool get _needsAck =>
+      _sensitiveCategories.contains(widget.orderData['category']?.toString());
+
+  @override
+  void initState() {
+    super.initState();
+    if (_needsAck) _loadPolicy();
+  }
+
+  Future<void> _loadPolicy() async {
+    try {
+      final policy = await ref
+          .read(apiClientProvider)
+          .getMap('/policies/SENSITIVE_CATEGORY');
+      if (mounted) {
+        setState(() {
+          _policy = policy;
+          _policyError = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _policyError = ApiClient.errorMessage(error));
+      }
+    }
+  }
 
   Future<void> _confirmOrder() async {
     if (_busy) return;
+    if (_needsAck && !_ackChecked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يجب الموافقة على إقرار الشحنة أولاً')),
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
+      if (_needsAck) {
+        final version = _policy?['version']?.toString() ?? '';
+        if (version.isEmpty) throw StateError('policy not loaded');
+        await ref
+            .read(apiClientProvider)
+            .post(
+              '/acknowledgements',
+              data: {
+                'type': 'SENSITIVE_CATEGORY',
+                'policyVersion': version,
+                'category': widget.orderData['category'],
+              },
+            );
+      }
       final order = await ref
           .read(apiClientProvider)
           .post('/orders', data: widget.orderData);
@@ -154,6 +211,84 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
                 ],
               ),
               const SizedBox(height: 24),
+              if (_needsAck) ...[
+                _ReviewSection(
+                  children: [
+                    if (_policyError != null) ...[
+                      const Text(
+                        'تعذر تحميل نص الإقرار',
+                        style: TextStyle(
+                          color: _reviewInk,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _policyError!,
+                        style: const TextStyle(
+                          color: _reviewMuted,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: () {
+                          setState(() => _policyError = null);
+                          _loadPolicy();
+                        },
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        label: const Text('إعادة تحميل الإقرار'),
+                      ),
+                    ] else if (_policy == null) ...[
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                    ] else ...[
+                      Text(
+                        _policy!['title']?.toString() ?? 'إقرار الشحنة',
+                        style: const TextStyle(
+                          color: _reviewInk,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _policy!['text']?.toString() ?? '',
+                        style: const TextStyle(
+                          color: _reviewMuted,
+                          fontSize: 13,
+                          height: 1.6,
+                        ),
+                      ),
+                      Material(
+                        color: Colors.transparent,
+                        child: CheckboxListTile(
+                          value: _ackChecked,
+                          onChanged: (value) =>
+                              setState(() => _ackChecked = value ?? false),
+                          title: const Text(
+                            'أقر بما ورد أعلاه وأوافق عليه',
+                            style: TextStyle(
+                              color: _reviewInk,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          contentPadding: EdgeInsets.zero,
+                          activeColor: _reviewGreen,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 14),
+              ],
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
