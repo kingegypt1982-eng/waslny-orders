@@ -18,6 +18,8 @@ describe('AdminService', () => {
     order: { count: jest.fn(), aggregate: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
     orderEvent: { findMany: jest.fn() },
     orderProof: { findMany: jest.fn() },
+    policyAcknowledgement: { findMany: jest.fn() },
+    purchaseInvoice: { findUnique: jest.fn() },
     walletTransaction: { findMany: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
     $transaction: jest.fn(async (callback: any) => callback(tx)),
@@ -303,5 +305,33 @@ describe('AdminService', () => {
     expect(proofs).toHaveLength(1);
     expect(proofs[0]).not.toHaveProperty('photoPath');
     expect(proofs[0]).toMatchObject({ type: 'PICKUP', capturedByName: 'Captain A', hasPhoto: true });
+  });
+
+  it('filters acknowledgement records and caps pagination at 100', async () => {
+    prisma.policyAcknowledgement.findMany.mockResolvedValue([]);
+
+    await service.acknowledgements({
+      userId: 'u1', orderId: 'o1', type: 'SENSITIVE_CATEGORY',
+      from: '2026-01-01T00:00:00.000Z', to: '2026-01-31T00:00:00.000Z', take: 500, skip: 20,
+    });
+
+    expect(prisma.policyAcknowledgement.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'u1', orderId: 'o1', type: 'SENSITIVE_CATEGORY',
+        createdAt: { gte: new Date('2026-01-01T00:00:00.000Z'), lte: new Date('2026-01-31T00:00:00.000Z') },
+      },
+      take: 100, skip: 20, orderBy: { createdAt: 'desc' }, include: expect.anything(),
+    });
+  });
+
+  it('returns invoice details without its private photo path', async () => {
+    prisma.purchaseInvoice.findUnique.mockResolvedValue({
+      id: 'invoice1', orderId: 'o1', amount: 120, photoPath: 'proofs/o1/private.png', status: 'SUBMITTED',
+    });
+
+    const invoice = await service.orderInvoice('o1');
+
+    expect(invoice).toMatchObject({ id: 'invoice1', hasPhoto: true });
+    expect(invoice).not.toHaveProperty('photoPath');
   });
 });

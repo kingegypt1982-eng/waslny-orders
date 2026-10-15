@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
 import 'screens.dart';
+import 'screens/tracking_screen.dart';
+import 'screens/order_review_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/splash_screen.dart';
 
@@ -59,7 +61,23 @@ final routerProvider = Provider<GoRouter>(
       ),
       GoRoute(
         path: '/new-order',
-        builder: (context, state) => const CreateOrderScreen(),
+        builder: (context, state) {
+          final extra = state.extra;
+          final category = extra is Map ? extra['category'] : null;
+          return CreateOrderScreen(
+            initialCategory: category is String ? category : null,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/order-review',
+        builder: (context, state) {
+          final extra = state.extra as Map;
+          return OrderReviewScreen(
+            orderData: Map<String, dynamic>.from(extra['orderData'] as Map),
+            quote: Map<String, dynamic>.from(extra['quote'] as Map),
+          );
+        },
       ),
       GoRoute(
         path: '/captain-documents',

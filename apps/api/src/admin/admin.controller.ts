@@ -13,6 +13,7 @@ import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { AdminTransactionsQueryDto } from './dto/admin-transactions-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { AdminTopUpsQueryDto } from '../topups/dto/admin-topups-query.dto';
+import { AdminAcknowledgementsQueryDto } from './dto/admin-acknowledgements-query.dto';
 import { AdminService } from './admin.service';
 
 class SuspendDto { @IsBoolean() suspended: boolean; }
@@ -29,6 +30,16 @@ export class AdminController {
   @Get('orders') orders(@Query() query: AdminOrdersQueryDto) { return this.admin.orders(query); }
   @Get('orders/:id/events') orderEvents(@Param('id') id: string) { return this.admin.getOrderEvents(id); }
   @Get('orders/:id/proofs') orderProofs(@Param('id') id: string) { return this.admin.orderProofs(id); }
+  @Get('orders/:id/invoice') orderInvoice(@Param('id') id: string) { return this.admin.orderInvoice(id); }
+  @Get('orders/:id/invoice/photo')
+  async orderInvoicePhoto(@Param('id') id: string) {
+    const file = await this.admin.orderInvoicePhoto(id);
+    return new StreamableFile(createReadStream(file.path), {
+      type: file.mimeType,
+      disposition: `inline; filename="${basename(file.path)}"`,
+    });
+  }
+  @Get('acknowledgements') acknowledgements(@Query() query: AdminAcknowledgementsQueryDto) { return this.admin.acknowledgements(query); }
   @Patch('orders/:id') updateOrder(@Param('id') id: string, @Body() body: AdminOrderDto, @CurrentUser() user: { id: string }) {
     return this.admin.updateOrder(id, body, user.id);
   }

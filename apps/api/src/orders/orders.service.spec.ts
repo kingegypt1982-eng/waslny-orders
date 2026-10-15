@@ -1,4 +1,5 @@
-import { ConflictException, ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { PolicyAcknowledgementType, PurchaseInvoiceStatus, ShipmentCategory } from '@prisma/client';
 import * as fs from 'fs';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
@@ -12,6 +13,7 @@ describe('OrdersService wallet rules', () => {
     order: { findUnique: jest.fn(), updateMany: jest.fn(), update: jest.fn(), create: jest.fn() },
     orderEvent: { create: jest.fn().mockResolvedValue({ id: 'e1' }) },
     orderProof: { findFirst: jest.fn(), create: jest.fn() },
+    purchaseInvoice: { findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
     captainProfile: { findUnique: jest.fn(), update: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
     wallet: { updateMany: jest.fn(), update: jest.fn() },
@@ -22,11 +24,13 @@ describe('OrdersService wallet rules', () => {
     order: { findUnique: jest.fn(), updateMany: jest.fn(), update: jest.fn() },
     orderEvent: { findMany: jest.fn() },
     orderProof: { findFirst: jest.fn(), create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
+    purchaseInvoice: { findUnique: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
     captainProfile: { update: jest.fn() },
   };
   const redis = { nearbyCaptains: jest.fn(), updateCaptainLocation: jest.fn() };
   const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
+  const policies = { hasAcknowledgement: jest.fn().mockResolvedValue({ id: 'ack1' }) };
   const orderEvents = new OrderEventsService(prisma as unknown as PrismaService);
 
   const service = new OrdersService(
@@ -34,12 +38,15 @@ describe('OrdersService wallet rules', () => {
     redis as unknown as RedisService,
     notifications as unknown as NotificationsService,
     orderEvents,
+    policies as any,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.$transaction.mockImplementation(async (callback: any) => callback(tx));
     tx.pricingSettings.upsert.mockResolvedValue({ minimumWalletBalance: 0 });
+    prisma.pricingSettings.upsert.mockResolvedValue({ basePrice: 30, pricePerKm: 8, commissionPercent: 10, minimumWalletBalance: 0, disabledCategories: [] });
+    policies.hasAcknowledgement.mockResolvedValue({ id: 'ack1' });
   });
 
   const acceptedOrder = {
@@ -81,6 +88,51 @@ describe('OrdersService wallet rules', () => {
 
     await expect(service.accept('o1', 'cap1')).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(tx.order.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('blocks a captain without current terms before touching the wallet', async () => {
+    tx.order.findUnique.mockResolvedValue({ id: 'o1', status: 'SEARCHING_CAPTAIN', captainId: null, commission: 15, category: 'PACKAGE' });
+    tx.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    policies.hasAcknowledgement.mockResolvedValueOnce(null);
+
+    await expect(service.accept('o1', 'cap1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'ACK_REQUIRED', type: PolicyAcknowledgementType.TERMS_CAPTAIN }),
+    });
+    expect(tx.wallet.updateMany).not.toHaveBeenCalled();
+    expect(tx.walletTransaction.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks a sensitive-category order without its order-scoped acknowledgement', async () => {
+    tx.order.findUnique.mockResolvedValue({ id: 'o1', status: 'SEARCHING_CAPTAIN', captainId: null, commission: 15, category: ShipmentCategory.FOOD });
+    tx.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    policies.hasAcknowledgement.mockResolvedValueOnce({ id: 'terms' }).mockResolvedValueOnce(null);
+
+    await expect(service.accept('o1', 'cap1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'ACK_REQUIRED', type: PolicyAcknowledgementType.SENSITIVE_CATEGORY }),
+    });
+    expect(tx.wallet.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('requires a client category acknowledgement before creating a sensitive order', async () => {
+    policies.hasAcknowledgement.mockResolvedValueOnce(null);
+    await expect(service.create('client1', {
+      pickupLabel: 'A', pickupLatitude: 30, pickupLongitude: 31,
+      deliveryLabel: 'B', deliveryLatitude: 30.1, deliveryLongitude: 31.1,
+      category: ShipmentCategory.MEDICINES, description: 'Medicine', recipientName: 'R', recipientPhone: '+201000000000',
+    })).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'ACK_REQUIRED', type: PolicyAcknowledgementType.SENSITIVE_CATEGORY }),
+    });
+    expect(tx.order.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a temporarily disabled category before quoting', async () => {
+    prisma.pricingSettings.upsert.mockResolvedValue({ disabledCategories: [ShipmentCategory.FOOD] });
+    await expect(service.create('client1', {
+      pickupLabel: 'A', pickupLatitude: 30, pickupLongitude: 31,
+      deliveryLabel: 'B', deliveryLatitude: 30.1, deliveryLongitude: 31.1,
+      category: ShipmentCategory.FOOD, description: 'Groceries', recipientName: 'R', recipientPhone: '+201000000000',
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.pricingSettings.upsert).toHaveBeenCalledTimes(1);
   });
 
   it('lets a client cancel an unassigned order with no money movement', async () => {
@@ -435,5 +487,104 @@ describe('OrdersService wallet rules', () => {
     await expect(
       service.proofPhotoForUser('o1', 'p1', { id: 'client1', role: 'CLIENT' as any }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  const invoiceOrder = {
+    id: 'o1', clientId: 'client1', captainId: 'cap1', status: 'PICKED_UP',
+    category: ShipmentCategory.PURCHASES, estimatedBudget: 250,
+  };
+
+  it('rejects invoice upload by an unassigned captain or for an unsupported category', async () => {
+    tx.order.findUnique.mockResolvedValue({ ...invoiceOrder, captainId: 'capX' });
+    await expect(service.submitInvoice('o1', 'cap1', { amount: 100 }, pngPhoto)).rejects.toBeInstanceOf(ForbiddenException);
+
+    tx.order.findUnique.mockResolvedValue({ ...invoiceOrder, category: ShipmentCategory.PACKAGE });
+    await expect(service.submitInvoice('o1', 'cap1', { amount: 100 }, pngPhoto)).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(tx.purchaseInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid amounts, budgets, duplicate invoices, and bad image bytes', async () => {
+    tx.order.findUnique.mockResolvedValue({ ...invoiceOrder });
+    await expect(service.submitInvoice('o1', 'cap1', { amount: -1 }, pngPhoto)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.submitInvoice('o1', 'cap1', { amount: 0 }, pngPhoto)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.submitInvoice('o1', 'cap1', { amount: 251 }, pngPhoto)).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'BUDGET_EXCEEDED' }),
+    });
+    expect(tx.purchaseInvoice.create).not.toHaveBeenCalled();
+
+    tx.purchaseInvoice.findUnique.mockResolvedValue({ id: 'existing' });
+    await expect(service.submitInvoice('o1', 'cap1', { amount: 100 }, pngPhoto)).rejects.toBeInstanceOf(ConflictException);
+
+    tx.purchaseInvoice.findUnique.mockResolvedValue(null);
+    jest.restoreAllMocks();
+    await expect(service.submitInvoice('o1', 'cap1', { amount: 100 }, { buffer: Buffer.from('not-image'), size: 9 }))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.submitInvoice('o1', 'cap1', { amount: 100 }, { buffer: pngPhoto.buffer, size: 5 * 1024 * 1024 + 1 }))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.purchaseInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('submits an invoice with a private photo path and records an event', async () => {
+    tx.order.findUnique.mockResolvedValue({ ...invoiceOrder });
+    tx.purchaseInvoice.findUnique.mockResolvedValue(null);
+    tx.purchaseInvoice.create.mockImplementation(async ({ data }: any) => ({
+      id: 'invoice1', ...data, status: PurchaseInvoiceStatus.SUBMITTED, createdAt: new Date(), photoPath: 'proofs/o1/random.png',
+    }));
+    prisma.order.findUnique.mockResolvedValue({ clientId: 'client1' });
+    jest.spyOn(proofUpload, 'saveProofPhoto').mockResolvedValue({ relativePath: 'proofs/o1/random.png', mimeType: 'image/png' });
+
+    const result = await service.submitInvoice('o1', 'cap1', { amount: 120, note: 'Receipt' }, pngPhoto);
+
+    expect(result).not.toHaveProperty('photoPath');
+    expect(result).toMatchObject({ id: 'invoice1', amount: expect.anything(), hasPhoto: true });
+    expect(tx.orderEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ orderId: 'o1', fromStatus: 'PICKED_UP', toStatus: 'PICKED_UP', actorRole: 'CAPTAIN' }),
+    });
+    expect(notifications.create).toHaveBeenCalledWith('client1', expect.any(String), expect.any(String), 'ORDER', { orderId: 'o1' });
+  });
+
+  it('lets only the owner respond once and does not move money', async () => {
+    const submitted = { id: 'invoice1', orderId: 'o1', status: PurchaseInvoiceStatus.SUBMITTED, clientRespondedAt: null, photoPath: 'proofs/o1/random.png' };
+    tx.order.findUnique.mockResolvedValue({ ...invoiceOrder });
+    tx.purchaseInvoice.findUnique.mockResolvedValueOnce(submitted).mockResolvedValueOnce({
+      ...submitted, status: PurchaseInvoiceStatus.DISPUTED, clientRespondedAt: new Date(), clientResponseReason: 'Mismatch',
+    });
+    tx.purchaseInvoice.updateMany.mockResolvedValue({ count: 1 });
+    prisma.order.findUnique.mockResolvedValue({ captainId: 'cap1' });
+
+    const result = await service.respondToInvoice('o1', 'client1', { action: 'DISPUTED', reason: 'Mismatch' });
+
+    expect(result).toMatchObject({ status: PurchaseInvoiceStatus.DISPUTED, hasPhoto: true });
+    expect(tx.orderEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ actorId: 'client1', actorRole: 'CLIENT', fromStatus: 'PICKED_UP', toStatus: 'PICKED_UP' }),
+    });
+    expect(tx.wallet.update).not.toHaveBeenCalled();
+    expect(tx.walletTransaction.create).not.toHaveBeenCalled();
+
+    tx.order.findUnique.mockResolvedValue({ ...invoiceOrder, clientId: 'another-client' });
+    await expect(service.respondToInvoice('o1', 'client1', { action: 'CONFIRMED' })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a single confirmation without a reason', async () => {
+    const submitted = { id: 'invoice1', orderId: 'o1', status: PurchaseInvoiceStatus.SUBMITTED, clientRespondedAt: null, photoPath: 'proofs/o1/random.png' };
+    tx.order.findUnique.mockResolvedValue({ ...invoiceOrder });
+    tx.purchaseInvoice.findUnique.mockResolvedValueOnce(submitted).mockResolvedValueOnce({
+      ...submitted, status: PurchaseInvoiceStatus.CONFIRMED, clientRespondedAt: new Date(),
+    });
+    tx.purchaseInvoice.updateMany.mockResolvedValue({ count: 1 });
+    prisma.order.findUnique.mockResolvedValue({ captainId: 'cap1' });
+
+    const result = await service.respondToInvoice('o1', 'client1', { action: 'CONFIRMED' });
+
+    expect(result.status).toBe(PurchaseInvoiceStatus.CONFIRMED);
+    tx.purchaseInvoice.findUnique.mockResolvedValue({ ...submitted, status: PurchaseInvoiceStatus.CONFIRMED });
+    await expect(service.respondToInvoice('o1', 'client1', { action: 'CONFIRMED' })).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.purchaseInvoice.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides invoices and photos from unrelated users', async () => {
+    prisma.order.findUnique.mockResolvedValue({ ...invoiceOrder, client: {}, captain: {} });
+    await expect(service.invoiceForUser('o1', { id: 'stranger', role: 'CLIENT' as any })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.purchaseInvoice.findUnique).not.toHaveBeenCalled();
   });
 });

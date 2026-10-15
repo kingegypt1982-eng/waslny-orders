@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { CaptainStatus, EventActor, NotificationType, OrderStatus, Prisma, TopUpStatus, UserRole, WalletTransactionType } from '@prisma/client';
+import { CaptainStatus, EventActor, NotificationType, OrderStatus, PolicyAcknowledgementType, Prisma, TopUpStatus, UserRole, WalletTransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
@@ -11,6 +11,8 @@ import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { AdminTransactionsQueryDto } from './dto/admin-transactions-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { AdminTopUpsQueryDto } from '../topups/dto/admin-topups-query.dto';
+import { AdminAcknowledgementsQueryDto } from './dto/admin-acknowledgements-query.dto';
+import { resolveUploadPath } from '../orders/proof-upload';
 
 @Injectable()
 export class AdminService {
@@ -129,6 +131,45 @@ export class AdminService {
       capturedByName: names.get(proof.capturedById) ?? null,
       hasPhoto: !!_photoPath,
     }));
+  }
+
+  acknowledgements(query: AdminAcknowledgementsQueryDto) {
+    const where: Prisma.PolicyAcknowledgementWhereInput = {};
+    if (query.userId) where.userId = query.userId;
+    if (query.orderId) where.orderId = query.orderId;
+    if (query.type) where.type = query.type as PolicyAcknowledgementType;
+    if (query.from || query.to) {
+      where.createdAt = {
+        ...(query.from ? { gte: new Date(query.from) } : {}),
+        ...(query.to ? { lte: new Date(query.to) } : {}),
+      };
+    }
+    return this.prisma.policyAcknowledgement.findMany({
+      where,
+      take: Math.min(query.take ?? 100, 100),
+      skip: query.skip ?? 0,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, name: true, role: true } },
+        order: { select: { id: true, reference: true, category: true } },
+      },
+    });
+  }
+
+  async orderInvoice(orderId: string) {
+    const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { orderId } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    const { photoPath, ...visible } = invoice;
+    return { ...visible, hasPhoto: !!photoPath };
+  }
+
+  async orderInvoicePhoto(orderId: string) {
+    const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { orderId }, select: { photoPath: true } });
+    if (!invoice?.photoPath || !invoice.photoPath.startsWith('proofs/')) throw new NotFoundException('Invoice photo not found');
+    const resolved = resolveUploadPath(invoice.photoPath);
+    if (!resolved || !existsSync(resolved.path)) throw new NotFoundException('Invoice photo is missing');
+    const mimeType = invoice.photoPath.endsWith('.png') ? 'image/png' : invoice.photoPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    return { path: resolved.path, mimeType };
   }
 
   async captainDocument(userId: string, type: string) {

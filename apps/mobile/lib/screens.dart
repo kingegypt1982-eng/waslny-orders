@@ -412,6 +412,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         : [
             WaslnyHomeScreen(
               onNavigate: (index) => setState(() => _index = index),
+              loadOrders: () => ref.read(apiClientProvider).getList('/orders'),
             ),
             const HistoryScreen(),
             const ProfileScreen(),
@@ -996,6 +997,28 @@ class _AvailableOrderCard extends ConsumerWidget {
             delivery: order['deliveryLabel'] as String? ?? '',
           ),
           const SizedBox(height: 12),
+          Directionality(
+            textDirection: TextDirection.rtl,
+            child: Column(
+              children: [
+                _MoneyRow(label: 'رسوم التوصيل', value: _egp(order['price'])),
+                const SizedBox(height: 6),
+                _MoneyRow(
+                  label: 'عمولة الشركة (10%) تُخصم من محفظتك',
+                  value: _egp(order['commission']),
+                ),
+                const Divider(height: 20),
+                _MoneyRow(
+                  label: 'صافي ربحك',
+                  value: _egp(
+                    _toDouble(order['price']) - _toDouble(order['commission']),
+                  ),
+                  emphasize: true,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1045,7 +1068,8 @@ final captainProfileProvider = FutureProvider<Map<String, dynamic>>(
 );
 
 class CreateOrderScreen extends ConsumerStatefulWidget {
-  const CreateOrderScreen({super.key});
+  const CreateOrderScreen({super.key, this.initialCategory});
+  final String? initialCategory;
   @override
   ConsumerState<CreateOrderScreen> createState() => _CreateOrderScreenState();
 }
@@ -1060,8 +1084,27 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
   LatLng _pickup = _cairo;
   LatLng _delivery = const LatLng(30.0131, 31.2089);
   String _category = 'PACKAGE';
-  Map<String, dynamic>? _quote;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    const supportedCategories = {
+      'PAPERS',
+      'MATERIALS',
+      'GOODS',
+      'SPARE_PARTS',
+      'PACKAGE',
+      'OTHER',
+      'MEDICINES',
+      'PURCHASES',
+      'FOOD',
+      'ELECTRONICS',
+    };
+    if (supportedCategories.contains(widget.initialCategory)) {
+      _category = widget.initialCategory!;
+    }
+  }
 
   @override
   void dispose() {
@@ -1087,13 +1130,28 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
         _delivery = point;
         _deliveryLabel.text = 'Selected delivery location';
       }
-      _quote = null;
     });
   }
 
   Future<void> _calculate() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _busy = true);
     try {
-      final result = await ref
+      final orderData = {
+        'pickupLabel': _pickupLabel.text.trim(),
+        'pickupLatitude': _pickup.latitude,
+        'pickupLongitude': _pickup.longitude,
+        'deliveryLabel': _deliveryLabel.text.trim(),
+        'deliveryLatitude': _delivery.latitude,
+        'deliveryLongitude': _delivery.longitude,
+        'category': _category,
+        'description': _description.text.trim().isEmpty
+            ? null
+            : _description.text.trim(),
+        'recipientName': _recipient.text.trim(),
+        'recipientPhone': _phone.text.trim(),
+      };
+      final quote = await ref
           .read(apiClientProvider)
           .post(
             '/orders/quote',
@@ -1104,36 +1162,16 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
               'deliveryLongitude': _delivery.longitude,
             },
           );
-      if (mounted) setState(() => _quote = result);
-    } catch (error) {
-      if (mounted) _showMessage(context, ApiClient.errorMessage(error));
-    }
-  }
-
-  Future<void> _create() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _busy = true);
-    try {
-      final order = await ref
-          .read(apiClientProvider)
-          .post(
-            '/orders',
-            data: {
-              'pickupLabel': _pickupLabel.text.trim(),
-              'pickupLatitude': _pickup.latitude,
-              'pickupLongitude': _pickup.longitude,
-              'deliveryLabel': _deliveryLabel.text.trim(),
-              'deliveryLatitude': _delivery.latitude,
-              'deliveryLongitude': _delivery.longitude,
-              'category': _category,
-              'description': _description.text.trim(),
-              'recipientName': _recipient.text.trim(),
-              'recipientPhone': _phone.text.trim(),
-            },
-          );
-      if (mounted) context.go('/track/${order['id']}');
-    } catch (error) {
-      if (mounted) _showMessage(context, ApiClient.errorMessage(error));
+      if (mounted) {
+        await context.push(
+          '/order-review',
+          extra: {'orderData': orderData, 'quote': quote},
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        _showMessage(context, 'تعذر احتساب السعر الآن. حاول مرة أخرى.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1190,6 +1228,13 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
                 ),
                 DropdownMenuItem(value: 'MATERIALS', child: Text('Materials')),
                 DropdownMenuItem(value: 'GOODS', child: Text('Goods')),
+                DropdownMenuItem(value: 'PURCHASES', child: Text('Purchases')),
+                DropdownMenuItem(value: 'FOOD', child: Text('Food and drinks')),
+                DropdownMenuItem(value: 'MEDICINES', child: Text('Medicines')),
+                DropdownMenuItem(
+                  value: 'ELECTRONICS',
+                  child: Text('Electronics'),
+                ),
                 DropdownMenuItem(
                   value: 'SPARE_PARTS',
                   child: Text('Spare parts'),
@@ -1209,9 +1254,8 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
               maxLines: 2,
               decoration: const InputDecoration(
                 labelText: 'Shipment details',
-                hintText: 'What is the captain picking up?',
+                hintText: 'What is the captain picking up? (optional)',
               ),
-              validator: _required,
             ),
             const SizedBox(height: 18),
             const Text(
@@ -1244,45 +1288,11 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
                   : 'Enter a contact number',
             ),
             const SizedBox(height: 14),
-            if (_quote != null)
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEAF4EC),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.route, color: _green),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '${_quote!['distanceKm']} km estimated',
-                        style: const TextStyle(color: _ink),
-                      ),
-                    ),
-                    Text(
-                      'EGP ${_quote!['price']}',
-                      style: const TextStyle(
-                        fontSize: 17,
-                        color: _green,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (_quote == null)
-              OutlinedButton.icon(
-                onPressed: _calculate,
-                icon: const Icon(Icons.calculate_outlined),
-                label: const Text('Calculate delivery price'),
-              ),
             const SizedBox(height: 8),
             _PrimaryButton(
-              label: _busy ? 'Requesting…' : 'Request a captain',
+              label: _busy ? 'جارٍ احتساب السعر…' : 'متابعة لمراجعة السعر',
               busy: _busy,
-              onPressed: _busy ? null : _create,
+              onPressed: _busy ? null : _calculate,
             ),
           ],
         ),
@@ -1387,230 +1397,6 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       ],
     ),
   );
-}
-
-class TrackingScreen extends ConsumerStatefulWidget {
-  const TrackingScreen({super.key, required this.orderId});
-  final String orderId;
-  @override
-  ConsumerState<TrackingScreen> createState() => _TrackingScreenState();
-}
-
-class _TrackingScreenState extends ConsumerState<TrackingScreen> {
-  Map<String, dynamic>? _order;
-  String? _error;
-  Timer? _timer;
-  @override
-  void initState() {
-    super.initState();
-    _load();
-    _timer = Timer.periodic(const Duration(seconds: 15), (_) => _load());
-  }
-
-  Future<void> _load() async {
-    try {
-      final data = await ref
-          .read(apiClientProvider)
-          .getMap('/orders/${widget.orderId}');
-      if (mounted)
-        setState(() {
-          _order = data;
-          _error = null;
-        });
-    } catch (error) {
-      if (mounted) setState(() => _error = ApiClient.errorMessage(error));
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final order = _order;
-    if (order == null)
-      return Scaffold(
-        appBar: AppBar(title: const Text('Track delivery')),
-        body: Center(
-          child: _error == null
-              ? const CircularProgressIndicator()
-              : Text(_error!),
-        ),
-      );
-    final status = order['status'] as String? ?? 'PENDING';
-    final pickup = LatLng(
-      (order['pickupLatitude'] as num).toDouble(),
-      (order['pickupLongitude'] as num).toDouble(),
-    );
-    final delivery = LatLng(
-      (order['deliveryLatitude'] as num).toDouble(),
-      (order['deliveryLongitude'] as num).toDouble(),
-    );
-    final steps = const [
-      'ACCEPTED',
-      'ARRIVED_AT_PICKUP',
-      'PICKED_UP',
-      'ON_THE_WAY',
-      'DELIVERED',
-      'COMPLETED',
-    ];
-    final role = ref.watch(sessionProvider)?['role'];
-    const nextStatus = {
-      'ACCEPTED': ('ARRIVED_AT_PICKUP', 'I have arrived at pickup'),
-      'ARRIVED_AT_PICKUP': ('PICKED_UP', 'Confirm shipment pickup'),
-      'PICKED_UP': ('ON_THE_WAY', 'Start delivery'),
-      'ON_THE_WAY': ('DELIVERED', 'Confirm delivery'),
-    };
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Order ${order['reference'] ?? ''}'),
-        actions: [
-          IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            flex: 5,
-            child: FlutterMap(
-              options: MapOptions(initialCenter: pickup, initialZoom: 11),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.waslny.orders',
-                ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: pickup,
-                      width: 36,
-                      height: 36,
-                      child: const Icon(Icons.circle, color: _green, size: 22),
-                    ),
-                    Marker(
-                      point: delivery,
-                      width: 40,
-                      height: 40,
-                      child: const Icon(
-                        Icons.location_pin,
-                        color: Color(0xFFD18154),
-                        size: 36,
-                      ),
-                    ),
-                  ],
-                ),
-                RichAttributionWidget(
-                  attributions: [
-                    TextSourceAttribution('OpenStreetMap contributors'),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 6,
-            child: ListView(
-              padding: const EdgeInsets.all(18),
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        status.replaceAll('_', ' '),
-                        style: const TextStyle(
-                          color: _ink,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 20,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      'EGP ${order['price']}',
-                      style: const TextStyle(
-                        color: _green,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 15),
-                _RouteLine(
-                  pickup: order['pickupLabel'] as String? ?? '',
-                  delivery: order['deliveryLabel'] as String? ?? '',
-                ),
-                const SizedBox(height: 19),
-                for (var i = 0; i < steps.length; i++)
-                  _TimelineStep(
-                    title: _statusLabel(steps[i]),
-                    active:
-                        steps.indexOf(status) >=
-                        i +
-                            (status == 'PENDING' ||
-                                    status == 'SEARCHING_CAPTAIN'
-                                ? 1
-                                : 0),
-                    last: i == steps.length - 1,
-                  ),
-                if (status == 'DELIVERED' &&
-                    (ref.read(sessionProvider)?['role'] == 'CLIENT'))
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14),
-                    child: _PrimaryButton(
-                      label: 'Confirm delivery',
-                      icon: Icons.check_circle_outline,
-                      onPressed: () async {
-                        try {
-                          await ref
-                              .read(apiClientProvider)
-                              .post('/orders/${widget.orderId}/complete');
-                          await _load();
-                        } catch (error) {
-                          if (context.mounted)
-                            _showMessage(
-                              context,
-                              ApiClient.errorMessage(error),
-                            );
-                        }
-                      },
-                    ),
-                  ),
-                if (role == 'CAPTAIN' && nextStatus.containsKey(status))
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14),
-                    child: _PrimaryButton(
-                      label: nextStatus[status]!.$2,
-                      icon: Icons.check_circle_outline,
-                      onPressed: () async {
-                        try {
-                          await ref
-                              .read(apiClientProvider)
-                              .patch(
-                                '/orders/${widget.orderId}/status',
-                                data: {'status': nextStatus[status]!.$1},
-                              );
-                          await _load();
-                        } catch (error) {
-                          if (context.mounted) {
-                            _showMessage(
-                              context,
-                              ApiClient.errorMessage(error),
-                            );
-                          }
-                        }
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class HistoryScreen extends ConsumerWidget {
@@ -2088,38 +1874,46 @@ class _RouteLine extends StatelessWidget {
   );
 }
 
-class _TimelineStep extends StatelessWidget {
-  const _TimelineStep({
-    required this.title,
-    required this.active,
-    required this.last,
+class _MoneyRow extends StatelessWidget {
+  const _MoneyRow({
+    required this.label,
+    required this.value,
+    this.emphasize = false,
   });
-  final String title;
-  final bool active, last;
+  final String label;
+  final String value;
+  final bool emphasize;
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 31,
-    child: Row(
-      children: [
-        Icon(
-          active ? Icons.check_circle : Icons.radio_button_unchecked,
-          size: 16,
-          color: active ? _green : const Color(0xFFC8D0C9),
-        ),
-        const SizedBox(width: 9),
-        Text(
-          title,
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          label,
           style: TextStyle(
-            color: active ? _ink : _muted,
-            fontSize: 11,
-            fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+            color: _ink,
+            fontSize: 13,
+            fontWeight: emphasize ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
-        if (!last) const Expanded(child: SizedBox()),
-      ],
-    ),
+      ),
+      Text(
+        value,
+        style: TextStyle(
+          color: emphasize ? _green : _ink,
+          fontSize: emphasize ? 15 : 13,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ],
   );
 }
+
+double _toDouble(Object? value) {
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+String _egp(Object? value) => 'EGP ${_toDouble(value).toStringAsFixed(2)}';
 
 class _PrimaryButton extends StatelessWidget {
   const _PrimaryButton({
@@ -2206,14 +2000,5 @@ const _cardDecoration = BoxDecoration(
   border: Border.fromBorderSide(BorderSide(color: Color(0xFFE8ECE7))),
 );
 String _firstName(String? name) => name?.split(' ').first ?? 'there';
-String _statusLabel(String status) => switch (status) {
-  'ACCEPTED' => 'Captain accepted',
-  'ARRIVED_AT_PICKUP' => 'At pickup location',
-  'PICKED_UP' => 'Shipment picked up',
-  'ON_THE_WAY' => 'On the way',
-  'DELIVERED' => 'Delivered',
-  'COMPLETED' => 'Completed',
-  _ => status,
-};
 void _showMessage(BuildContext context, String text) =>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));

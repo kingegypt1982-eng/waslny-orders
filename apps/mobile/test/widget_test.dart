@@ -11,12 +11,14 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:wasalny_orders/app.dart';
 import 'package:wasalny_orders/core/api_client.dart';
 import 'package:wasalny_orders/screens/home_screen.dart';
 import 'package:wasalny_orders/screens/register_screen.dart';
+import 'package:wasalny_orders/screens.dart';
 
 void main() {
   testWidgets('choosing client opens registration with client role', (
@@ -310,21 +312,161 @@ void main() {
         child: const WasalnyApp(),
       ),
     );
-    await tester.pumpAndSettle();
+    // Let the splash entrance animation finish without reaching the 6s timer.
+    await tester.pump(const Duration(milliseconds: 1300));
 
-    expect(find.text('Waslny Orders'), findsOneWidget);
+    expect(find.text('Waslny'), findsOneWidget);
+    expect(find.text('Orders'), findsOneWidget);
     expect(find.text('توصيل طلباتك بسهولة وأمان'), findsOneWidget);
-    expect(find.text('أورلان'), findsOneWidget);
-    expect(find.text('مبيعات'), findsNWidgets(2));
-    expect(find.text('مشتريات'), findsOneWidget);
 
-    await tester.pump(const Duration(milliseconds: 2500));
+    await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
 
-    expect(find.text('Your delivery,\nhandled.'), findsOneWidget);
-    expect(find.text('Create an account'), findsOneWidget);
+    expect(find.text('اختر نوع الحساب'), findsOneWidget);
+    expect(find.text('مندوب'), findsOneWidget);
+    expect(find.text('عميل'), findsOneWidget);
+  });
+
+  testWidgets('home category opens new order with its category extra', (
+    tester,
+  ) async {
+    final router = GoRouter(
+      initialLocation: '/',
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => WaslnyHomeScreen(
+            onNavigate: _ignoreTab,
+            loadOrders: () async => [],
+          ),
+        ),
+        GoRoute(
+          path: '/new-order',
+          builder: (context, state) {
+            final extra = state.extra;
+            final category = extra is Map ? extra['category'] : null;
+            return Scaffold(body: Text('new-order:$category'));
+          },
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+
+    expect(find.text('أخرى'), findsNothing);
+    expect(find.byIcon(Icons.check_circle), findsNothing);
+
+    await tester.ensureVisible(find.text('أدوية'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('أدوية'));
+    await tester.pumpAndSettle();
+    expect(find.text('new-order:MEDICINES'), findsOneWidget);
+
+    router.go('/');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('اطلب مندوب'));
+    await tester.pumpAndSettle();
+    expect(find.text('new-order:null'), findsOneWidget);
+  });
+
+  testWidgets('safety card opens one active order or routes to order history', (
+    tester,
+  ) async {
+    var response = <dynamic>[];
+    var shouldFail = false;
+    var selectedTab = -1;
+    Future<List<dynamic>> loadOrders() async {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+      if (shouldFail) throw Exception('network');
+      return response;
+    }
+
+    final router = GoRouter(
+      initialLocation: '/',
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => WaslnyHomeScreen(
+            onNavigate: (index) => selectedTab = index,
+            loadOrders: loadOrders,
+          ),
+        ),
+        GoRoute(
+          path: '/track/:id',
+          builder: (context, state) =>
+              Scaffold(body: Text('tracking:${state.pathParameters['id']}')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+
+    Future<void> tapSafetyCard() async {
+      await tester.scrollUntilVisible(
+        find.text('أمان في التوصيل'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('أمان في التوصيل'));
+      await tester.pumpAndSettle();
+    }
+
+    response = [
+      {'id': 'order-1', 'status': 'ON_THE_WAY'},
+      {'id': 'order-2', 'status': 'DELIVERED'},
+    ];
+    await tapSafetyCard();
+    expect(find.text('tracking:order-1'), findsOneWidget);
+
+    router.go('/');
+    await tester.pumpAndSettle();
+    response = [
+      {'id': 'order-2', 'status': 'ACCEPTED'},
+      {'id': 'order-3', 'status': 'PICKED_UP'},
+    ];
+    await tapSafetyCard();
+    expect(selectedTab, 1);
+    expect(router.routeInformationProvider.value.uri.path, '/');
+
+    router.go('/');
+    await tester.pumpAndSettle();
+    response = [
+      {'id': 'order-4', 'status': 'DELIVERED'},
+      {'id': 'order-5', 'status': 'COMPLETED'},
+      {'id': 'order-6', 'status': 'CANCELLED'},
+    ];
+    await tapSafetyCard();
+    expect(find.text('لا توجد طلبات جارية الآن'), findsOneWidget);
+    expect(router.routeInformationProvider.value.uri.path, '/');
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    router.go('/');
+    await tester.pumpAndSettle();
+    shouldFail = true;
+    await tapSafetyCard();
+    expect(find.text('تعذر تحميل الطلبات الآن'), findsOneWidget);
+    expect(router.routeInformationProvider.value.uri.path, '/');
+  });
+
+  testWidgets('new order accepts an optional initial category', (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(home: CreateOrderScreen(initialCategory: 'FOOD')),
+      ),
+    );
+
+    final category = tester.widget<DropdownButtonFormField<String>>(
+      find.byType(DropdownButtonFormField<String>),
+    );
+    expect(category.initialValue, 'FOOD');
   });
 }
+
+void _ignoreTab(int _) {}
 
 class _TestApiClient extends ApiClient {
   _TestApiClient(super.preferences, {this.error, this.role = 'CAPTAIN'});

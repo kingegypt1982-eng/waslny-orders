@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:latlong2/latlong.dart';
 
 class WaslnyHomeScreen extends StatefulWidget {
-  const WaslnyHomeScreen({super.key, required this.onNavigate});
+  const WaslnyHomeScreen({
+    super.key,
+    required this.onNavigate,
+    required this.loadOrders,
+  });
 
   final ValueChanged<int> onNavigate;
+  final Future<List<dynamic>> Function() loadOrders;
 
   @override
   State<WaslnyHomeScreen> createState() => _WaslnyHomeScreenState();
@@ -20,52 +24,50 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
   static const Color border = Color(0xFF24515B);
 
   int selectedTab = 0;
-  String selectedParcel = 'طرود وطلبات';
-  String? pickupAddress;
-  String? destinationAddress;
-  LatLng? pickupLocation;
-  LatLng? destinationLocation;
+  bool _loadingOrders = false;
 
   final List<Map<String, dynamic>> parcelTypes = [
     {
       'title': 'مشتريات',
+      'category': 'PURCHASES',
       'icon': Icons.shopping_bag_rounded,
       'color': Color(0xFF269BFF),
     },
     {
       'title': 'طعام ومشروبات',
+      'category': 'FOOD',
       'icon': Icons.lunch_dining_rounded,
       'color': Color(0xFFFFA72B),
     },
     {
       'title': 'طرود وطلبات',
+      'category': 'PACKAGE',
       'icon': Icons.inventory_2_rounded,
       'color': Color(0xFFFFB45A),
     },
     {
       'title': 'مستندات وأوراق',
+      'category': 'PAPERS',
       'icon': Icons.description_rounded,
       'color': Color(0xFF8ECFFF),
     },
     {
       'title': 'أدوية',
+      'category': 'MEDICINES',
       'icon': Icons.medical_services_rounded,
       'color': Color(0xFF55E2BC),
     },
     {
       'title': 'إلكترونيات',
+      'category': 'ELECTRONICS',
       'icon': Icons.devices_rounded,
       'color': Color(0xFF7FA8FF),
     },
     {
       'title': 'هدايا',
+      'category': 'GOODS',
       'icon': Icons.card_giftcard_rounded,
       'color': Color(0xFFFF697C),
-    },
-    {
-      'title': 'أخرى',
-      'icon': Icons.more_horiz_rounded,
-      'color': Color(0xFFE1EAF0),
     },
   ];
 
@@ -79,111 +81,39 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
     );
   }
 
-  Future<void> chooseAddress({required bool pickup}) async {
-    final controller = TextEditingController(
-      text: pickup ? pickupAddress : destinationAddress,
-    );
-    final result = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: card,
-        title: Text(
-          pickup ? 'عنوان الاستلام' : 'عنوان التسليم',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'اكتب العنوان أو اسم المكان',
-            hintStyle: TextStyle(color: muted),
-            enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: border),
-            ),
-            focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: green),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('إلغاء'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final value = controller.text.trim();
-              if (value.isNotEmpty) {
-                Navigator.pop(dialogContext, value);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: green,
-              foregroundColor: bg,
-            ),
-            child: const Text('تأكيد'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (result == null || !mounted) return;
-    setState(() {
-      if (pickup) {
-        if (pickupAddress != result) pickupLocation = null;
-        pickupAddress = result;
-      } else {
-        if (destinationAddress != result) destinationLocation = null;
-        destinationAddress = result;
-      }
-    });
-  }
-
-  Future<void> chooseMapLocation({required bool pickup}) async {
-    final result = await context.push<Map<String, dynamic>>(
-      '/map-picker?title=${pickup ? 'مكان الاستلام' : 'مكان التسليم'}',
-    );
-    if (result == null || !mounted) return;
-    final location = LatLng(
-      (result['lat'] as num).toDouble(),
-      (result['lon'] as num).toDouble(),
-    );
-    setState(() {
-      if (pickup) {
-        pickupLocation = location;
-        pickupAddress ??= 'موقع محدد على الخريطة';
-      } else {
-        destinationLocation = location;
-        destinationAddress ??= 'موقع محدد على الخريطة';
-      }
-    });
-  }
-
   void startOrder() {
-    if (pickupAddress == null || destinationAddress == null) {
-      showMessage('أدخل عنوان الاستلام والتسليم أولاً');
-      return;
+    context.push('/new-order');
+  }
+
+  Future<void> _openActiveOrder() async {
+    if (_loadingOrders) return;
+    setState(() => _loadingOrders = true);
+    try {
+      final orders = await widget.loadOrders();
+      const terminalStatuses = {'DELIVERED', 'COMPLETED', 'CANCELLED'};
+      final activeOrders = orders.where((item) {
+        if (item is! Map) return false;
+        return !terminalStatuses.contains(item['status']?.toString());
+      }).toList();
+      if (!mounted) return;
+      if (activeOrders.length == 1) {
+        final order = activeOrders.single as Map;
+        final orderId = order['id']?.toString();
+        if (orderId == null || orderId.isEmpty) {
+          showMessage('تعذر تحميل الطلبات الآن');
+        } else {
+          context.push('/track/$orderId');
+        }
+      } else if (activeOrders.length > 1) {
+        widget.onNavigate(1);
+      } else {
+        showMessage('لا توجد طلبات جارية الآن');
+      }
+    } catch (_) {
+      if (mounted) showMessage('تعذر تحميل الطلبات الآن');
+    } finally {
+      if (mounted) setState(() => _loadingOrders = false);
     }
-    if (pickupLocation == null || destinationLocation == null) {
-      showMessage('حدد موقع الاستلام والتسليم على الخريطة أولاً');
-      return;
-    }
-    final parcel = parcelTypes.firstWhere(
-      (item) => item['title'] == selectedParcel,
-    );
-    context.push(
-      '/new-order',
-      extra: {
-        'pickupLabel': pickupAddress,
-        'pickupLatitude': pickupLocation!.latitude,
-        'pickupLongitude': pickupLocation!.longitude,
-        'deliveryLabel': destinationAddress,
-        'deliveryLatitude': destinationLocation!.latitude,
-        'deliveryLongitude': destinationLocation!.longitude,
-        'category': parcel['category'],
-      },
-    );
   }
 
   @override
@@ -203,7 +133,6 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                     const SizedBox(height: 20),
                     buildHeroBanner(),
                     const SizedBox(height: 18),
-                    buildAddressCard(),
                     const SizedBox(height: 23),
                     buildSectionTitle('اختر نوع الطرد'),
                     const SizedBox(height: 13),
@@ -389,124 +318,6 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
     );
   }
 
-  Widget addressTile({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-    required VoidCallback onMapTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          children: [
-            Container(
-              width: 45,
-              height: 45,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.14),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 25),
-            ),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: muted, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: 'تحديد على الخريطة',
-              onPressed: onMapTap,
-              icon: const Icon(Icons.map_outlined, color: green, size: 21),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget buildAddressCard() {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: card,
-        borderRadius: BorderRadius.circular(23),
-        border: Border.all(color: border),
-      ),
-      child: Column(
-        children: [
-          addressTile(
-            icon: Icons.location_on_rounded,
-            color: green,
-            title: 'من',
-            subtitle: pickupAddress ?? 'اختر عنوان الاستلام',
-            onTap: () => chooseAddress(pickup: true),
-            onMapTap: () => chooseMapLocation(pickup: true),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Row(
-              children: [
-                const SizedBox(width: 17),
-                Container(height: 20, width: 2, color: border),
-              ],
-            ),
-          ),
-          addressTile(
-            icon: Icons.location_on_rounded,
-            color: const Color(0xFFFF4B64),
-            title: 'إلى',
-            subtitle: destinationAddress ?? 'اختر عنوان التسليم',
-            onTap: () => chooseAddress(pickup: false),
-            onMapTap: () => chooseMapLocation(pickup: false),
-          ),
-          const SizedBox(height: 13),
-          SizedBox(
-            width: double.infinity,
-            height: 47,
-            child: ElevatedButton(
-              onPressed: startOrder,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: green,
-                foregroundColor: bg,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: const Text(
-                'متابعة الطلب',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget buildSectionTitle(String title) {
     return Row(
       children: [
@@ -533,133 +344,148 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
             : constraints.maxWidth < 650
             ? 3
             : 4;
-        return GridView.builder(
-          itemCount: parcelTypes.length,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            crossAxisSpacing: 9,
-            mainAxisSpacing: 10,
-            mainAxisExtent: 128,
-          ),
-          itemBuilder: (context, index) {
-            final item = parcelTypes[index];
-            final title = item['title'] as String;
-            final icon = item['icon'] as IconData;
-            final color = item['color'] as Color;
-            final selected = selectedParcel == title;
-
-            return Material(
-              color: selected ? const Color(0xFF103D3B) : card,
-              borderRadius: BorderRadius.circular(17),
-              child: InkWell(
-                onTap: () => setState(() => selectedParcel = title),
-                borderRadius: BorderRadius.circular(17),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 11,
-                  ),
-                  decoration: BoxDecoration(
+        final itemWidth = (constraints.maxWidth - 9 * (columns - 1)) / columns;
+        return Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 9,
+          runSpacing: 10,
+          children: [
+            for (final item in parcelTypes)
+              SizedBox(
+                width: itemWidth,
+                height: 128,
+                child: Material(
+                  color: card,
+                  borderRadius: BorderRadius.circular(17),
+                  child: InkWell(
+                    onTap: () {
+                      context.push(
+                        '/new-order',
+                        extra: {'category': item['category']},
+                      );
+                    },
                     borderRadius: BorderRadius.circular(17),
-                    border: Border.all(
-                      color: selected ? green : border,
-                      width: selected ? 1.5 : 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 11,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(color: border),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            height: 45,
+                            width: 45,
+                            decoration: BoxDecoration(
+                              color: (item['color'] as Color).withValues(
+                                alpha: 0.12,
+                              ),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              item['icon'] as IconData,
+                              color: item['color'] as Color,
+                              size: 29,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            item['title'] as String,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        height: 45,
-                        width: 45,
-                        decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Icon(icon, color: color, size: 29),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        title,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: selected ? green : Colors.white,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                          height: 1.4,
-                        ),
-                      ),
-                      if (selected) ...[
-                        const SizedBox(height: 3),
-                        const Icon(Icons.check_circle, color: green, size: 13),
-                      ],
-                    ],
                   ),
                 ),
               ),
-            );
-          },
+          ],
         );
       },
     );
   }
 
   Widget buildSafetyBanner() {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF0B3035), Color(0xFF08242D)],
-        ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _openActiveOrder,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: border),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 54,
-            height: 54,
-            decoration: BoxDecoration(
-              color: green.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(17),
+        child: Container(
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF0B3035), Color(0xFF08242D)],
             ),
-            child: const Icon(
-              Icons.verified_user_outlined,
-              color: green,
-              size: 31,
-            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: border),
           ),
-          const SizedBox(width: 13),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'أمان في التوصيل',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
+          child: Row(
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: green.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(17),
+                ),
+                child: const Icon(
+                  Icons.verified_user_outlined,
+                  color: green,
+                  size: 31,
+                ),
+              ),
+              const SizedBox(width: 13),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'أمان في التوصيل',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'تابع طلبك من الاستلام حتى التسليم',
+                      style: TextStyle(color: muted, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              if (_loadingOrders)
+                const SizedBox(
+                  width: 17,
+                  height: 17,
+                  child: CircularProgressIndicator(
+                    color: green,
+                    strokeWidth: 2,
                   ),
+                )
+              else
+                const Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  color: Colors.white,
+                  size: 17,
                 ),
-                SizedBox(height: 6),
-                Text(
-                  'تابع طلبك من الاستلام حتى التسليم',
-                  style: TextStyle(color: muted, fontSize: 11),
-                ),
-              ],
-            ),
+            ],
           ),
-          const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: Colors.white,
-            size: 17,
-          ),
-        ],
+        ),
       ),
     );
   }

@@ -1,4 +1,5 @@
-import { IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsArray, IsEnum, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { ShipmentCategory } from '@prisma/client';
 
 export class UpdatePricingDto {
   @IsNumber() @Min(0) basePrice: number;
@@ -9,4 +10,5 @@ export class UpdatePricingDto {
   @IsOptional() @IsNumber() @Min(1) maxTopUpAmount?: number;
   @IsOptional() @IsNumber() @Min(0) @Max(20) paymentFeePercent?: number;
   @IsOptional() @IsNumber() @Min(0) paymentFeeFixed?: number;
+  @IsOptional() @IsArray() @IsEnum(ShipmentCategory, { each: true }) disabledCategories?: ShipmentCategory[];
 }

@@ -1,11 +1,15 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { EventActor, NotificationType, OrderStatus, Prisma, ProofType, UserRole, WalletTransactionType } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { EventActor, NotificationType, OrderStatus, PolicyAcknowledgementType, Prisma, ProofType, PurchaseInvoiceStatus, ShipmentCategory, UserRole, WalletTransactionType } from '@prisma/client';
 import { existsSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { PoliciesService } from '../policies/policies.service';
+import { POLICY_VERSION } from '../policies/policy-content.v1';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
+import { RespondInvoiceDto } from './dto/respond-invoice.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
 import { ProofPhotoInput, resolveUploadPath, saveProofPhoto } from './proof-upload';
 
@@ -25,6 +29,7 @@ export class OrdersService {
     private readonly redis: RedisService,
     private readonly notifications: NotificationsService,
     private readonly orderEvents: OrderEventsService,
+    private readonly policies: PoliciesService,
   ) {}
 
   /** Best-effort notification: never breaks the order flow. */
@@ -77,11 +82,26 @@ export class OrdersService {
   }
 
   async create(clientId: string, input: CreateOrderDto) {
+    const settings = await this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
+    if (settings.disabledCategories?.includes(input.category)) {
+      throw new BadRequestException({ code: 'CATEGORY_DISABLED', message: 'هذه الفئة متوقفة مؤقتًا عن استقبال الطلبات' });
+    }
+    const budgetCategories: ShipmentCategory[] = [ShipmentCategory.PURCHASES, ShipmentCategory.FOOD];
+    if (input.estimatedBudget !== undefined && !budgetCategories.includes(input.category)) {
+      throw new BadRequestException('Estimated budget is only available for purchases and food');
+    }
+    if (isSensitiveCategory(input.category) && !(await this.policies.hasAcknowledgement(
+      clientId,
+      PolicyAcknowledgementType.SENSITIVE_CATEGORY,
+      { orderId: null, category: input.category },
+    ))) {
+      throw ackRequired(PolicyAcknowledgementType.SENSITIVE_CATEGORY, { category: input.category });
+    }
     const quote = await this.quote(input);
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.create({
         data: {
-          clientId, ...input, status: OrderStatus.SEARCHING_CAPTAIN,
+          clientId, ...input, description: input.description?.trim() || '', status: OrderStatus.SEARCHING_CAPTAIN,
           distanceKm: quote.distanceKm, price: quote.price, commission: quote.commission,
         },
       });
@@ -134,6 +154,16 @@ export class OrdersService {
       if (captain.status !== 'ACTIVE') throw new ForbiddenException('Captain account is not approved');
       if ((order.status !== OrderStatus.PENDING && order.status !== OrderStatus.SEARCHING_CAPTAIN) || order.captainId) {
         throw new UnprocessableEntityException('Order is no longer available');
+      }
+      if (!(await this.policies.hasAcknowledgement(captainId, PolicyAcknowledgementType.TERMS_CAPTAIN, { orderId: null, category: null }))) {
+        throw ackRequired(PolicyAcknowledgementType.TERMS_CAPTAIN);
+      }
+      if (isSensitiveCategory(order.category) && !(await this.policies.hasAcknowledgement(
+        captainId,
+        PolicyAcknowledgementType.SENSITIVE_CATEGORY,
+        { orderId, category: order.category },
+      ))) {
+        throw ackRequired(PolicyAcknowledgementType.SENSITIVE_CATEGORY, { orderId, category: order.category });
       }
       const required = Math.max(Number(order.commission), Number(pricing.minimumWalletBalance));
       const debit = await tx.wallet.updateMany({
@@ -276,6 +306,114 @@ export class OrdersService {
     );
     await this.notifyClient(updated, 'Order delivered', `Order ${updated.reference} was delivered. Please confirm receipt.`);
     return updated;
+  }
+
+  async submitInvoice(orderId: string, captainId: string, input: SubmitInvoiceDto, photo?: ProofPhotoInput) {
+    if (!photo) throw new BadRequestException('Invoice photo is required');
+    if (!Number.isFinite(input.amount) || input.amount <= 0) throw new BadRequestException('Invoice amount must be greater than zero');
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({ where: { id: orderId } });
+      if (!order) throw new NotFoundException('Order not found');
+      if (order.captainId !== captainId) throw new ForbiddenException();
+      if (order.category !== ShipmentCategory.PURCHASES && order.category !== ShipmentCategory.FOOD) {
+        throw new UnprocessableEntityException('Invoices are only available for purchases and food orders');
+      }
+      if (order.status !== OrderStatus.PICKED_UP && order.status !== OrderStatus.ON_THE_WAY) {
+        throw new UnprocessableEntityException('Invoice can only be submitted after pickup and before delivery');
+      }
+      const existing = await tx.purchaseInvoice.findUnique({ where: { orderId } });
+      if (existing) throw new ConflictException('Invoice already submitted');
+      if (order.estimatedBudget && new Prisma.Decimal(input.amount).greaterThan(order.estimatedBudget)) {
+        throw new BadRequestException({ code: 'BUDGET_EXCEEDED', message: 'Invoice amount exceeds the estimated budget' });
+      }
+      if (!(await this.policies.hasAcknowledgement(captainId, PolicyAcknowledgementType.PURCHASE_INVOICE, { orderId }))) {
+        throw ackRequired(PolicyAcknowledgementType.PURCHASE_INVOICE, { orderId });
+      }
+      const photoPath = (await saveProofPhoto(orderId, photo)).relativePath;
+      const created = await tx.purchaseInvoice.create({
+        data: {
+          orderId,
+          capturedById: captainId,
+          amount: new Prisma.Decimal(input.amount),
+          photoPath,
+          note: input.note,
+        },
+      });
+      await this.orderEvents.record(tx, {
+        orderId,
+        fromStatus: order.status,
+        toStatus: order.status,
+        actorId: captainId,
+        actorRole: EventActor.CAPTAIN,
+        note: 'Purchase invoice submitted',
+      });
+      return created;
+    });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { clientId: true } });
+    if (order) await this.notify(order.clientId, 'فاتورة مشتريات جديدة', 'أرسل المندوب فاتورة لمراجعتها.', NotificationType.ORDER, { orderId });
+    return this.sanitizeInvoice(invoice);
+  }
+
+  async respondToInvoice(orderId: string, clientId: string, input: RespondInvoiceDto) {
+    if (input.action === PurchaseInvoiceStatus.DISPUTED && !input.reason?.trim()) {
+      throw new BadRequestException('A reason is required to dispute an invoice');
+    }
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({ where: { id: orderId } });
+      if (!order) throw new NotFoundException('Order not found');
+      if (order.clientId !== clientId) throw new ForbiddenException();
+      const current = await tx.purchaseInvoice.findUnique({ where: { orderId } });
+      if (!current) throw new NotFoundException('Invoice not found');
+      if (current.status !== PurchaseInvoiceStatus.SUBMITTED || current.clientRespondedAt) {
+        throw new ConflictException('Invoice has already received a client response');
+      }
+      const changed = await tx.purchaseInvoice.updateMany({
+        where: { id: current.id, status: PurchaseInvoiceStatus.SUBMITTED, clientRespondedAt: null },
+        data: {
+          status: input.action,
+          clientRespondedAt: new Date(),
+          clientResponseReason: input.action === PurchaseInvoiceStatus.DISPUTED ? input.reason!.trim() : null,
+        },
+      });
+      if (!changed.count) throw new ConflictException('Invoice has already received a client response');
+      const updated = await tx.purchaseInvoice.findUnique({ where: { orderId } });
+      await this.orderEvents.record(tx, {
+        orderId,
+        fromStatus: order.status,
+        toStatus: order.status,
+        actorId: clientId,
+        actorRole: EventActor.CLIENT,
+        note: input.action === PurchaseInvoiceStatus.CONFIRMED ? 'Client confirmed purchase invoice' : 'Client disputed purchase invoice',
+      });
+      return updated!;
+    });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { captainId: true } });
+    if (order?.captainId) {
+      await this.notify(order.captainId, 'رد العميل على الفاتورة', 'راجع رد العميل على فاتورة الطلب.', NotificationType.ORDER, { orderId });
+    }
+    return this.sanitizeInvoice(invoice);
+  }
+
+  async invoiceForUser(orderId: string, user: { id: string; role: UserRole }) {
+    await this.getForUser(orderId, user);
+    const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { orderId } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    return this.sanitizeInvoice(invoice);
+  }
+
+  async invoicePhotoForUser(orderId: string, user: { id: string; role: UserRole }) {
+    await this.getForUser(orderId, user);
+    const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { orderId }, select: { photoPath: true } });
+    if (!invoice?.photoPath || !invoice.photoPath.startsWith('proofs/')) throw new NotFoundException('Invoice photo not found');
+    const resolved = resolveUploadPath(invoice.photoPath);
+    if (!resolved || !existsSync(resolved.path)) throw new NotFoundException('Invoice photo is missing');
+    const mimeType = invoice.photoPath.endsWith('.png') ? 'image/png' : invoice.photoPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    return { path: resolved.path, mimeType };
+  }
+
+  private sanitizeInvoice<T extends { photoPath: string }>(invoice: T) {
+    const { photoPath, ...visible } = invoice;
+    return { ...visible, hasPhoto: !!photoPath };
   }
 
   async complete(orderId: string, clientId: string) {
@@ -459,4 +597,19 @@ export class OrdersService {
   transactions(userId: string) {
     return this.prisma.walletTransaction.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 100 });
   }
+}
+
+const sensitiveCategories: ShipmentCategory[] = [
+  ShipmentCategory.MEDICINES,
+  ShipmentCategory.PURCHASES,
+  ShipmentCategory.FOOD,
+  ShipmentCategory.ELECTRONICS,
+];
+
+function isSensitiveCategory(category: ShipmentCategory) {
+  return sensitiveCategories.includes(category);
+}
+
+function ackRequired(type: PolicyAcknowledgementType, details: Record<string, string> = {}) {
+  return new ForbiddenException({ code: 'ACK_REQUIRED', type, policyVersion: POLICY_VERSION, ...details });
 }

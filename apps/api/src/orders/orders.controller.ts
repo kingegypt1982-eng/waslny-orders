@@ -10,6 +10,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ProofNoteDto } from './dto/proof-note.dto';
+import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
+import { RespondInvoiceDto } from './dto/respond-invoice.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { PROOF_MAX_BYTES } from './proof-upload';
@@ -54,6 +56,31 @@ export class OrdersController {
     @UploadedFile() photo?: Express.Multer.File,
   ) {
     return this.orders.submitDeliveryProof(id, user.id, toPhotoInput(photo), body?.note);
+  }
+  @Post(':id/invoice') @Roles('CAPTAIN')
+  @UseInterceptors(FileInterceptor('photo', { storage: memoryStorage(), limits: { fileSize: PROOF_MAX_BYTES } }))
+  submitInvoice(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: SubmitInvoiceDto,
+    @UploadedFile() photo?: Express.Multer.File,
+  ) {
+    return this.orders.submitInvoice(id, user.id, body, toPhotoInput(photo));
+  }
+  @Post(':id/invoice/respond') @Roles('CLIENT')
+  respondToInvoice(@Param('id') id: string, @CurrentUser() user: { id: string }, @Body() body: RespondInvoiceDto) {
+    return this.orders.respondToInvoice(id, user.id, body);
+  }
+  @Get(':id/invoice') invoice(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) {
+    return this.orders.invoiceForUser(id, user);
+  }
+  @Get(':id/invoice/photo')
+  async invoicePhoto(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) {
+    const file = await this.orders.invoicePhotoForUser(id, user);
+    return new StreamableFile(createReadStream(file.path), {
+      type: file.mimeType,
+      disposition: `inline; filename="${basename(file.path)}"`,
+    });
   }
   @Get(':id/proofs') proofs(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) {
     return this.orders.proofsForUser(id, user);

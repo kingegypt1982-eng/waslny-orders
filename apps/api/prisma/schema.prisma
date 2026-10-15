@@ -39,6 +39,23 @@ enum ShipmentCategory {
   SPARE_PARTS
   PACKAGE
   OTHER
+  MEDICINES
+  PURCHASES
+  FOOD
+  ELECTRONICS
+}
+
+enum PolicyAcknowledgementType {
+  TERMS_CAPTAIN
+  TERMS_CLIENT
+  SENSITIVE_CATEGORY
+  PURCHASE_INVOICE
+}
+
+enum PurchaseInvoiceStatus {
+  SUBMITTED
+  CONFIRMED
+  DISPUTED
 }
 
 enum WalletTransactionType {
@@ -100,6 +117,8 @@ model User {
   captainOrders      Order[]             @relation("CaptainOrders")
   walletTransactions WalletTransaction[]
   payments           PaymentIntent[]
+  policyAcknowledgements PolicyAcknowledgement[]
+  capturedInvoices   PurchaseInvoice[]   @relation("CapturedInvoices")
 }
 
 model CaptainProfile {
@@ -223,6 +242,9 @@ model Order {
   payments          PaymentIntent[]
   events            OrderEvent[]
   proofs            OrderProof[]
+  policyAcknowledgements PolicyAcknowledgement[]
+  purchaseInvoice   PurchaseInvoice?
+  estimatedBudget   Decimal?         @db.Decimal(12, 2)
 
   @@index([status, createdAt])
   @@index([clientId, createdAt])
@@ -257,6 +279,41 @@ model OrderProof {
   @@index([orderId])
 }
 
+model PolicyAcknowledgement {
+  id              String                    @id @default(cuid())
+  userId          String
+  type            PolicyAcknowledgementType
+  policyVersion   String
+  orderId         String?
+  category        ShipmentCategory?
+  idempotencyKey  String                    @unique
+  createdAt       DateTime                  @default(now())
+  ip              String?
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  order           Order?                    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([userId, type, createdAt])
+  @@index([orderId, type])
+}
+
+model PurchaseInvoice {
+  id                 String               @id @default(cuid())
+  orderId            String               @unique
+  capturedById       String
+  amount             Decimal              @db.Decimal(12, 2)
+  currency           String               @default("EGP")
+  photoPath          String
+  note               String?
+  status             PurchaseInvoiceStatus @default(SUBMITTED)
+  clientRespondedAt  DateTime?
+  clientResponseReason String?
+  createdAt          DateTime             @default(now())
+  order              Order                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  capturedBy         User                 @relation("CapturedInvoices", fields: [capturedById], references: [id], onDelete: Restrict)
+
+  @@index([capturedById, createdAt])
+}
+
 model PricingSettings {
   id                  String   @id @default("default")
   basePrice           Decimal  @default(30) @db.Decimal(10, 2)
@@ -267,6 +324,7 @@ model PricingSettings {
   maxTopUpAmount      Decimal  @default(10000) @db.Decimal(12, 2)
   paymentFeePercent   Decimal  @default(2.5) @db.Decimal(5, 2)
   paymentFeeFixed     Decimal  @default(0) @db.Decimal(10, 2)
+  disabledCategories  ShipmentCategory[] @default([])
   currency            String   @default("EGP")
   updatedAt           DateTime @updatedAt
 }

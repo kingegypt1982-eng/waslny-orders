@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Waslny (Chrome :5173)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "chrome",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--web-port=5173",
+        "--dart-define=API_BASE_URL=http://localhost:3000/api/v1"
+      ]
+    }
+  ]
+}
