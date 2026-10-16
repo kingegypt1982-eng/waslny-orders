@@ -561,7 +561,7 @@ class _TStatusCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _tStatusAr(status),
+                  trackStatusAr(status),
                   style: TextStyle(
                     color: cancelled ? _tDanger : Colors.white,
                     fontSize: 17,
@@ -922,7 +922,7 @@ int _tStepIndex(String status) => switch (status) {
   _ => 0,
 };
 
-String _tStatusAr(String status) => switch (status) {
+String trackStatusAr(String status) => switch (status) {
   'PENDING' || 'SEARCHING_CAPTAIN' => 'جارٍ البحث عن مندوب',
   'ACCEPTED' => 'تم قبول الطلب',
   'ARRIVED_AT_PICKUP' => 'المندوب عند الاستلام',

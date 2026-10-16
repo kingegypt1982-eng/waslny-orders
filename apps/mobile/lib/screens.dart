@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
+import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/notifications_screen.dart';
+import 'screens/profile_screen.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -1413,51 +1415,18 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   );
 }
 
-class HistoryScreen extends ConsumerWidget {
-  const HistoryScreen({super.key});
-  @override
-  Widget build(BuildContext context, WidgetRef ref) => Scaffold(
-    appBar: AppBar(title: const Text('Your orders')),
-    body: FutureBuilder<List<dynamic>>(
-      future: ref.watch(apiClientProvider).getList('/orders'),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting)
-          return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError)
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: _ErrorBox(
-                message: ApiClient.errorMessage(snapshot.error!),
-              ),
-            ),
-          );
-        final orders = snapshot.data ?? [];
-        if (orders.isEmpty)
-          return const _EmptyState(
-            icon: Icons.inventory_2_outlined,
-            title: 'No deliveries yet',
-            subtitle: 'Your shipment history will appear here.',
-          );
-        return RefreshIndicator(
-          onRefresh: () async => ref.invalidate(clientOrdersProvider),
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              for (final item in orders)
-                _OrderCard(order: Map<String, dynamic>.from(item as Map)),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-}
-
 class _OrderFeed extends ConsumerWidget {
   const _OrderFeed({required this.isArabic});
   final bool isArabic;
 
+  static const _feedActiveStatuses = {
+    'PENDING',
+    'SEARCHING_CAPTAIN',
+    'ACCEPTED',
+    'ARRIVED_AT_PICKUP',
+    'PICKED_UP',
+    'ON_THE_WAY',
+  };
   @override
   Widget build(BuildContext context, WidgetRef ref) =>
       FutureBuilder<List<dynamic>>(
@@ -1472,7 +1441,13 @@ class _OrderFeed extends ConsumerWidget {
             );
           if (snapshot.hasError)
             return _ErrorBox(message: ApiClient.errorMessage(snapshot.error!));
-          final orders = (snapshot.data ?? []).take(3).toList();
+          final orders = (snapshot.data ?? [])
+              .where(
+                (item) =>
+                    _feedActiveStatuses.contains('${(item as Map)['status']}'),
+              )
+              .take(3)
+              .toList();
           if (orders.isEmpty)
             return _EmptyState(
               icon: Icons.inventory_2_outlined,
@@ -1689,86 +1664,6 @@ class _TransactionRow extends StatelessWidget {
       trailing: Text(
         'EGP ${amount.abs().toStringAsFixed(2)}',
         style: const TextStyle(fontWeight: FontWeight.w700, color: _ink),
-      ),
-    );
-  }
-}
-
-class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({super.key});
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(sessionProvider) ?? {};
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profile & settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          CircleAvatar(
-            radius: 32,
-            backgroundColor: const Color(0xFFE4F1E9),
-            child: Text(
-              _firstName(user['name'] as String?).substring(0, 1).toUpperCase(),
-              style: const TextStyle(
-                color: _green,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Center(
-            child: Text(
-              user['name'] as String? ?? '',
-              style: const TextStyle(
-                fontSize: 18,
-                color: _ink,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          Center(
-            child: Text(
-              user['email'] as String? ?? '',
-              style: const TextStyle(color: _muted, fontSize: 12),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Card(
-            color: Colors.white,
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.person_outline),
-                  title: const Text('Account details'),
-                  trailing: const Icon(Icons.chevron_right),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.notifications_none),
-                  title: const Text('Notifications'),
-                  trailing: const Icon(Icons.chevron_right),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.help_outline),
-                  title: const Text('Help & support'),
-                  trailing: const Icon(Icons.chevron_right),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 15),
-          OutlinedButton.icon(
-            onPressed: () async {
-              await ref.read(apiClientProvider).clearSession();
-              ref.read(sessionProvider.notifier).state = null;
-              if (context.mounted) context.go('/');
-            },
-            icon: const Icon(Icons.logout),
-            label: const Text('Sign out'),
-          ),
-        ],
       ),
     );
   }
