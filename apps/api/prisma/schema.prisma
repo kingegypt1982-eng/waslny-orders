@@ -130,6 +130,9 @@ model CaptainProfile {
   nationalIdDocument String        @default("PENDING_UPLOAD")
   licenseDocument    String        @default("PENDING_UPLOAD")
   vehicleDocument    String        @default("PENDING_UPLOAD")
+  nationalIdBackDocument String    @default("PENDING_UPLOAD")
+  licenseBackDocument    String    @default("PENDING_UPLOAD")
+  vehicleBackDocument    String    @default("PENDING_UPLOAD")
   vehicleType        String?
   vehiclePlate       String?
   dateOfBirth        DateTime?

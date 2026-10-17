@@ -191,8 +191,11 @@ export class AdminService {
   async captainDocument(userId: string, type: string) {
     const fields = {
       identity: 'nationalIdDocument',
+      'identity-back': 'nationalIdBackDocument',
       license: 'licenseDocument',
+      'license-back': 'licenseBackDocument',
       vehicle: 'vehicleDocument',
+      'vehicle-back': 'vehicleBackDocument',
     } as const;
     const field = fields[type as keyof typeof fields];
     if (!field) throw new NotFoundException('Document not found');

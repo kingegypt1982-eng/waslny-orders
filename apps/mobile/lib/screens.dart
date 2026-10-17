@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
 import 'core/google_auth.dart';
@@ -999,6 +1001,14 @@ const List<_Governorate> _governorates = [
   _Governorate('Egyptians born abroad', 'المصريون المولودون بالخارج'),
 ];
 
+enum _DocumentSource { camera, gallery, file }
+
+class _PickedDocument {
+  _PickedDocument({required this.bytes, required this.name});
+  final Uint8List bytes;
+  final String name;
+}
+
 class CaptainDocumentsScreen extends ConsumerStatefulWidget {
   const CaptainDocumentsScreen({super.key});
   @override
@@ -1013,9 +1023,14 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   static const int _stepCount = 3;
   static const Map<String, String> _docFields = {
     'identity': 'nationalIdDocument',
+    'identity-back': 'nationalIdBackDocument',
     'license': 'licenseDocument',
+    'license-back': 'licenseBackDocument',
     'vehicle': 'vehicleDocument',
+    'vehicle-back': 'vehicleBackDocument',
   };
+  static const int _maxDocumentBytes = 8 * 1024 * 1024;
+  static const List<String> _allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
 
   final _nationalId = TextEditingController();
   final _phone = TextEditingController();
@@ -1031,9 +1046,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   String? _governorate;
   NationalIdValidation? _nationalIdResult;
   String? _nationalIdErrorText;
-  Uint8List? _pickedBytes;
-  String? _pickedName;
-  String? _pickedType;
+  final Map<String, _PickedDocument> _picked = {};
 
   @override
   void initState() {
@@ -1059,7 +1072,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     return value is String && value != 'PENDING_UPLOAD';
   }
 
-  bool _hasDocument(String type) => _uploaded(type) || _pickedType == type;
+  bool _hasDocument(String type) => _uploaded(type) || _picked.containsKey(type);
 
   String? get _nationalIdLast4 {
     final value = _profile['nationalIdLast4'];
@@ -1092,12 +1105,14 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       _nationalIdLast4 != null &&
       _profile['governorate'] is String &&
       _profilePhone != null &&
-      _uploaded('identity');
+      _uploaded('identity') &&
+      _uploaded('identity-back');
 
   bool get _licenseComplete =>
       _profile['licenseNumber'] is String &&
       (_profile['licenseNumber'] as String).isNotEmpty &&
-      _uploaded('license');
+      _uploaded('license') &&
+      _uploaded('license-back');
 
   int _firstIncompleteStep() {
     if (!_personalComplete) return 0;
@@ -1194,40 +1209,128 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   }
 
   Future<void> _pickFile(String type) async {
+    if (_submitting) return;
+    final source = await showModalBottomSheet<_DocumentSource>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!kIsWeb)
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: Text(_t('Take a photo', 'التقاط صورة')),
+                onTap: () =>
+                    Navigator.pop(sheetContext, _DocumentSource.camera),
+              ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(_t('Choose from gallery', 'اختيار من المعرض')),
+              onTap: () =>
+                  Navigator.pop(sheetContext, _DocumentSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: Text(_t('Choose a file (JPG/PNG/PDF)', 'اختيار ملف (JPG/PNG/PDF)')),
+              onTap: () => Navigator.pop(sheetContext, _DocumentSource.file),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    final picked = switch (source) {
+      _DocumentSource.camera => await _pickImage(ImageSource.camera),
+      _DocumentSource.gallery => await _pickImage(ImageSource.gallery),
+      _DocumentSource.file => await _pickFromFiles(),
+    };
+    if (picked == null || !mounted) return;
+    setState(() => _picked[type] = picked);
+  }
+
+  Future<_PickedDocument?> _pickImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final image = await picker.pickImage(
+        source: source,
+        maxWidth: 1600,
+        imageQuality: 85,
+      );
+      if (image == null) return null;
+      final bytes = await image.readAsBytes();
+      return _validated(bytes, image.name);
+    } catch (_) {
+      if (mounted) {
+        _showMessage(
+          context,
+          _t('Could not read the selected document.', 'تعذر قراءة المستند المحدد.'),
+        );
+      }
+      return null;
+    }
+  }
+
+  Future<_PickedDocument?> _pickFromFiles() async {
     final selection = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
+      allowedExtensions: _allowedExtensions,
       withData: true,
     );
-    if (selection == null || selection.files.isEmpty || !mounted) return;
+    if (selection == null || selection.files.isEmpty) return null;
     final file = selection.files.single;
     if (file.bytes == null) {
-      _showMessage(
-        context,
-        _t('Could not read the selected document.', 'تعذر قراءة المستند المحدد.'),
-      );
-      return;
+      if (mounted) {
+        _showMessage(
+          context,
+          _t('Could not read the selected document.', 'تعذر قراءة المستند المحدد.'),
+        );
+      }
+      return null;
     }
-    setState(() {
-      _pickedBytes = file.bytes;
-      _pickedName = file.name;
-      _pickedType = type;
-    });
+    return _validated(file.bytes!, file.name);
+  }
+
+  _PickedDocument? _validated(Uint8List bytes, String name) {
+    final extension = name.toLowerCase().split('.').last;
+    if (!_allowedExtensions.contains(extension)) {
+      if (mounted) {
+        _showMessage(
+          context,
+          _t(
+            'Upload a PDF, JPG, or PNG file.',
+            'ارفع ملف PDF أو JPG أو PNG.',
+          ),
+        );
+      }
+      return null;
+    }
+    if (bytes.length > _maxDocumentBytes) {
+      if (mounted) {
+        _showMessage(
+          context,
+          _t(
+            'The file is larger than 8MB.',
+            'حجم الملف أكبر من 8 ميجابايت.',
+          ),
+        );
+      }
+      return null;
+    }
+    return _PickedDocument(bytes: bytes, name: name);
   }
 
   Future<void> _uploadPicked(String type) async {
-    if (_pickedType != type || _pickedBytes == null) return;
+    final picked = _picked[type];
+    if (picked == null) return;
     await ref
         .read(apiClientProvider)
         .uploadFile(
           '/captains/documents/$type',
-          _pickedBytes!,
-          _pickedName ?? 'document',
+          picked.bytes,
+          picked.name,
         );
     _profile[_docFields[type]!] = 'uploaded';
-    _pickedBytes = null;
-    _pickedName = null;
-    _pickedType = null;
+    _picked.remove(type);
   }
 
   String _describeError(Object error) {
@@ -1289,8 +1392,18 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
         _showMessage(
           context,
           _t(
-            'Attach the national ID document.',
-            'أرفق صورة بطاقة الرقم القومي.',
+            'Attach the front of the national ID document.',
+            'أرفق صورة وجه بطاقة الرقم القومي.',
+          ),
+        );
+        return false;
+      }
+      if (!_hasDocument('identity-back')) {
+        _showMessage(
+          context,
+          _t(
+            'Attach the back of the national ID document.',
+            'أرفق صورة ظهر بطاقة الرقم القومي.',
           ),
         );
         return false;
@@ -1306,8 +1419,18 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
         _showMessage(
           context,
           _t(
-            'Attach the driving license document.',
-            'أرفق صورة رخصة القيادة.',
+            'Attach the front of the driving license document.',
+            'أرفق صورة وجه رخصة القيادة.',
+          ),
+        );
+        return false;
+      }
+      if (!_hasDocument('license-back')) {
+        _showMessage(
+          context,
+          _t(
+            'Attach the back of the driving license document.',
+            'أرفق صورة ظهر رخصة القيادة.',
           ),
         );
         return false;
@@ -1325,6 +1448,13 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       _showMessage(
         context,
         _t('Attach the vehicle registration document.', 'أرفق صورة رخصة المركبة.'),
+      );
+      return false;
+    }
+    if (!_hasDocument('vehicle-back')) {
+      _showMessage(
+        context,
+        _t('Attach the back of the vehicle registration document.', 'أرفق صورة ظهر رخصة المركبة.'),
       );
       return false;
     }
@@ -1346,6 +1476,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
         if (typed.isNotEmpty) data['nationalId'] = typed;
         await api.patch('/captains/me/profile', data: data);
         await _uploadPicked('identity');
+        await _uploadPicked('identity-back');
         _profile['governorate'] = _governorate;
         if (typed.isNotEmpty) {
           _profile['nationalIdLast4'] = typed.substring(typed.length - 4);
@@ -1359,6 +1490,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
           data: {'licenseNumber': license},
         );
         await _uploadPicked('license');
+        await _uploadPicked('license-back');
         _profile['licenseNumber'] = license;
       } else {
         final registration = _registrationNumber.text.trim();
@@ -1367,6 +1499,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
           data: {'vehicleRegistrationNumber': registration},
         );
         await _uploadPicked('vehicle');
+        await _uploadPicked('vehicle-back');
         _profile['vehicleRegistrationNumber'] = registration;
       }
       if (!mounted) return;
@@ -1606,11 +1739,13 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     const SizedBox(height: 16),
     _documentTile(
       'identity',
-      _t('National ID document', 'بطاقة الرقم القومي'),
-      _t(
-        'A photo of the front and back of your ID',
-        'صورة بطاقة الرقم القومي (الوجهان)',
-      ),
+      _t('National ID (front)', 'بطاقة الرقم القومي (الوجه)'),
+      _t('A clear photo of the front of your ID', 'صورة واضحة لوجه البطاقة'),
+    ),
+    _documentTile(
+      'identity-back',
+      _t('National ID (back)', 'بطاقة الرقم القومي (الظهر)'),
+      _t('A clear photo of the back of your ID', 'صورة واضحة لظهر البطاقة'),
     ),
   ];
 
@@ -1630,8 +1765,13 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     const SizedBox(height: 16),
     _documentTile(
       'license',
-      _t('License document', 'رخصة القيادة'),
-      _t('A photo of your driving license', 'صورة رخصة القيادة'),
+      _t('License (front)', 'رخصة القيادة (الوجه)'),
+      _t('A photo of the front of your driving license', 'صورة وجه رخصة القيادة'),
+    ),
+    _documentTile(
+      'license-back',
+      _t('License (back)', 'رخصة القيادة (الظهر)'),
+      _t('A photo of the back of your driving license', 'صورة ظهر رخصة القيادة'),
     ),
   ];
 
@@ -1666,8 +1806,13 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     const SizedBox(height: 16),
     _documentTile(
       'vehicle',
-      _t('Vehicle registration document', 'رخصة المركبة'),
-      _t('A photo of the vehicle registration', 'صورة رخصة تسيير المركبة'),
+      _t('Vehicle registration (front)', 'رخصة المركبة (الوجه)'),
+      _t('A photo of the front of the vehicle registration', 'صورة وجه رخصة تسيير المركبة'),
+    ),
+    _documentTile(
+      'vehicle-back',
+      _t('Vehicle registration (back)', 'رخصة المركبة (الظهر)'),
+      _t('A photo of the back of the vehicle registration', 'صورة ظهر رخصة تسيير المركبة'),
     ),
   ];
 
@@ -1730,7 +1875,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
 
   Widget _documentTile(String type, String title, String subtitle) {
     final uploaded = _uploaded(type);
-    final picked = _pickedType == type;
+    final picked = _picked.containsKey(type);
     final ready = uploaded || picked;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),

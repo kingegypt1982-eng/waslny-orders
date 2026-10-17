@@ -4,6 +4,11 @@ import { NationalIdCryptoService } from './national-id-crypto.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
 
+jest.mock('fs/promises', () => ({
+  mkdir: jest.fn().mockResolvedValue(undefined),
+  writeFile: jest.fn().mockResolvedValue(undefined),
+}));
+
 describe('CaptainsController profile', () => {
   const prisma = {
     captainProfile: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
@@ -102,5 +107,31 @@ describe('CaptainsController profile', () => {
       expect.arrayContaining(['phone', 'governorate', 'licenseNumber', 'vehicleRegistrationNumber', 'dateOfBirth', 'vehicle']),
     );
     expect(result.missing).not.toContain('nationalId');
+  });
+
+  it.each([
+    ['identity', 'nationalIdDocument'],
+    ['identity-back', 'nationalIdBackDocument'],
+    ['license', 'licenseDocument'],
+    ['license-back', 'licenseBackDocument'],
+    ['vehicle', 'vehicleDocument'],
+    ['vehicle-back', 'vehicleBackDocument'],
+  ])('stores %s documents in the %s field', async (type, field) => {
+    prisma.captainProfile.update.mockResolvedValue({});
+    const file = { mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any;
+
+    await controller.uploadDocument({ id: 'u1' }, type, file);
+
+    expect(prisma.captainProfile.update).toHaveBeenCalledWith({
+      where: { userId: 'u1' },
+      data: { [field]: expect.stringContaining('captains') },
+    });
+  });
+
+  it('rejects unknown document types', async () => {
+    const file = { mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any;
+    await expect(
+      controller.uploadDocument({ id: 'u1' }, 'passport', file),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

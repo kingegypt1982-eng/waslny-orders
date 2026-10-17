@@ -44,6 +44,7 @@ dependencies:
   # GoogleSignIn.signIn(), which cannot return an idToken on the web.
   google_sign_in_web: 0.12.4+4
   file_picker: ^10.2.0
+  image_picker: ^1.1.2
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

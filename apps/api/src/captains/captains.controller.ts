@@ -170,6 +170,9 @@ export class CaptainsController {
 
 const documentFields = {
   identity: 'nationalIdDocument',
+  'identity-back': 'nationalIdBackDocument',
   license: 'licenseDocument',
+  'license-back': 'licenseBackDocument',
   vehicle: 'vehicleDocument',
+  'vehicle-back': 'vehicleBackDocument',
 } as const;
