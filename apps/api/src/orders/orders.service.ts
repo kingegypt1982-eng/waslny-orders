@@ -82,6 +82,10 @@ export class OrdersService {
   }
 
   async create(clientId: string, input: CreateOrderDto) {
+    const client = await this.prisma.user.findUnique({ where: { id: clientId }, select: { phone: true } });
+    if (!client?.phone?.trim()) {
+      throw new ForbiddenException({ code: 'PROFILE_INCOMPLETE', missing: ['phone'] });
+    }
     const settings = await this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
     if (settings.disabledCategories?.includes(input.category)) {
       throw new BadRequestException({ code: 'CATEGORY_DISABLED', message: 'هذه الفئة متوقفة مؤقتًا عن استقبال الطلبات' });
@@ -151,6 +155,10 @@ export class OrdersService {
       const captain = await tx.captainProfile.findUnique({ where: { userId: captainId } });
       const pricing = await tx.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
       if (!order || !captain) throw new NotFoundException('Order or captain not found');
+      const captainUser = await tx.user.findUnique({ where: { id: captainId }, select: { phone: true } });
+      if (!captainUser?.phone?.trim()) {
+        throw new ForbiddenException({ code: 'PROFILE_INCOMPLETE', missing: ['phone'] });
+      }
       if (captain.status !== 'ACTIVE') throw new ForbiddenException('Captain account is not approved');
       if ((order.status !== OrderStatus.PENDING && order.status !== OrderStatus.SEARCHING_CAPTAIN) || order.captainId) {
         throw new UnprocessableEntityException('Order is no longer available');

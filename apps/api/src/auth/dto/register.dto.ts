@@ -1,10 +1,10 @@
-import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail() email: string;
   @MinLength(8) password: string;
   @IsString() @MinLength(2) name: string;
-  @IsOptional() @IsString() phone?: string;
+  @IsPhoneNumber('EG') phone: string;
   @IsIn(['CLIENT', 'CAPTAIN']) role: 'CLIENT' | 'CAPTAIN';
   @IsOptional() @IsString() nationalIdDocument?: string;
   @IsOptional() @IsString() licenseDocument?: string;

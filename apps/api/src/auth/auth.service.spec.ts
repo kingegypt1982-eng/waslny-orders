@@ -27,6 +27,7 @@ describe('AuthService', () => {
       email: 'Client@Waslny.com',
       password: 'Secret123',
       name: 'Test Client',
+      phone: '01000000000',
       role: 'CLIENT',
     });
 
@@ -41,13 +42,13 @@ describe('AuthService', () => {
   it('rejects duplicate emails on register', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'existing' });
     await expect(
-      service.register({ email: 'dup@waslny.com', password: 'Secret123', name: 'Dup', role: 'CLIENT' }),
+      service.register({ email: 'dup@waslny.com', password: 'Secret123', name: 'Dup', phone: '01000000000', role: 'CLIENT' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('requires vehicle details for captain registration', async () => {
     await expect(
-      service.register({ email: 'cap@waslny.com', password: 'Secret123', name: 'Cap', role: 'CAPTAIN' }),
+      service.register({ email: 'cap@waslny.com', password: 'Secret123', name: 'Cap', phone: '01000000000', role: 'CAPTAIN' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 

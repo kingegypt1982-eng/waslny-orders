@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
+import 'core/google_auth.dart';
+import 'screens/forgot_password.dart';
 import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/notifications_screen.dart';
@@ -228,6 +231,39 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     }
   }
 
+  /// Exchanges a Google ID token for a Wasalny session. Shared by the native
+  /// and web Google buttons.
+  Future<void> _submitGoogle(String idToken) async {
+    setState(() => _busy = true);
+    try {
+      final api = ref.read(apiClientProvider);
+      final payload = await api.post(
+        '/auth/google',
+        data: {
+          'idToken': idToken,
+          'role': _role,
+          if (_role == 'CAPTAIN' && _vehicleType.text.trim().isNotEmpty)
+            'vehicleType': _vehicleType.text.trim(),
+          if (_role == 'CAPTAIN' && _plate.text.trim().isNotEmpty)
+            'vehiclePlate': _plate.text.trim(),
+        },
+      );
+      await api.saveSession(payload);
+      ref.read(sessionProvider.notifier).state = Map<String, dynamic>.from(
+        payload['user'] as Map,
+      );
+      if (mounted) {
+        context.go(_role == 'CAPTAIN' ? '/captain-documents' : '/');
+      }
+    } catch (error) {
+      if (mounted) {
+        _showMessage(context, googleAuthErrorMessage(error, isArabic: false));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -361,6 +397,55 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  const Row(
+                    children: [
+                      Expanded(child: Divider()),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Text('or', style: TextStyle(color: _muted)),
+                      ),
+                      Expanded(child: Divider()),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _register
+                        ? 'Signing up as a ${_role == 'CAPTAIN' ? 'captain' : 'client'}'
+                        : 'Signing in as a ${_role == 'CAPTAIN' ? 'captain' : 'client'}',
+                    style: const TextStyle(fontSize: 11, color: _muted),
+                  ),
+                  const SizedBox(height: 6),
+                  GoogleSignInButton(
+                    label: _register
+                        ? 'Sign up with Google'
+                        : 'Continue with Google',
+                    text: _register
+                        ? GoogleButtonText.signUp
+                        : GoogleButtonText.continueWith,
+                    busy: _busy,
+                    onIdToken: _submitGoogle,
+                    onCancel: () => _showMessage(
+                      context,
+                      googleAuthErrorMessage(
+                        const GoogleAuthCancelled(),
+                        isArabic: false,
+                      ),
+                    ),
+                    onError: (error) => _showMessage(
+                      context,
+                      googleAuthErrorMessage(error, isArabic: false),
+                    ),
+                  ),
+                  if (!_register) ...[
+                    const SizedBox(height: 4),
+                    Center(
+                      child: TextButton(
+                        onPressed: () => showForgotPasswordDialog(context),
+                        child: const Text('Forgot password?'),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -773,6 +858,147 @@ class _ApprovalPanel extends StatelessWidget {
   );
 }
 
+enum NationalIdError {
+  missing,
+  length,
+  century,
+  date,
+  impossibleDate,
+  governorate,
+  underage,
+}
+
+class NationalIdValidation {
+  const NationalIdValidation({required this.valid, this.error, this.birthDate});
+  final bool valid;
+  final NationalIdError? error;
+  final DateTime? birthDate;
+}
+
+const Set<String> _governorateCodes = {
+  '01',
+  '02',
+  '03',
+  '04',
+  '11',
+  '12',
+  '13',
+  '14',
+  '15',
+  '16',
+  '17',
+  '18',
+  '19',
+  '21',
+  '22',
+  '23',
+  '24',
+  '25',
+  '26',
+  '27',
+  '28',
+  '29',
+  '31',
+  '32',
+  '33',
+  '34',
+  '35',
+  '88',
+};
+
+NationalIdValidation validateEgyptianNationalId(
+  String raw, {
+  DateTime? reference,
+}) {
+  final id = raw.trim();
+  if (!RegExp(r'^\d{14}$').hasMatch(id)) {
+    return const NationalIdValidation(valid: false, error: NationalIdError.length);
+  }
+  final century = id[0];
+  final yearPart = int.parse(id.substring(1, 3));
+  final int fullYear;
+  if (century == '2') {
+    fullYear = 1900 + yearPart;
+  } else if (century == '3') {
+    fullYear = 2000 + yearPart;
+  } else {
+    return const NationalIdValidation(
+      valid: false,
+      error: NationalIdError.century,
+    );
+  }
+  final month = int.parse(id.substring(3, 5));
+  final day = int.parse(id.substring(5, 7));
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return const NationalIdValidation(valid: false, error: NationalIdError.date);
+  }
+  final birthDate = DateTime(fullYear, month, day);
+  if (birthDate.year != fullYear ||
+      birthDate.month != month ||
+      birthDate.day != day) {
+    return const NationalIdValidation(
+      valid: false,
+      error: NationalIdError.impossibleDate,
+    );
+  }
+  final code = id.substring(7, 9);
+  if (!_governorateCodes.contains(code)) {
+    return const NationalIdValidation(
+      valid: false,
+      error: NationalIdError.governorate,
+    );
+  }
+  final now = reference ?? DateTime.now();
+  var age = now.year - fullYear;
+  if (now.month < month || (now.month == month && now.day < day)) {
+    age -= 1;
+  }
+  if (age < 18) {
+    return const NationalIdValidation(
+      valid: false,
+      error: NationalIdError.underage,
+    );
+  }
+  return NationalIdValidation(valid: true, birthDate: birthDate);
+}
+
+class _Governorate {
+  const _Governorate(this.name, this.arabic);
+  final String name;
+  final String arabic;
+}
+
+const List<_Governorate> _governorates = [
+  _Governorate('Cairo', 'القاهرة'),
+  _Governorate('Alexandria', 'الإسكندرية'),
+  _Governorate('Port Said', 'بورسعيد'),
+  _Governorate('Suez', 'السويس'),
+  _Governorate('Damietta', 'دمياط'),
+  _Governorate('Dakahlia', 'الدقهلية'),
+  _Governorate('Sharkia', 'الشرقية'),
+  _Governorate('Qalyubia', 'القليوبية'),
+  _Governorate('Kafr El Sheikh', 'كفر الشيخ'),
+  _Governorate('Gharbia', 'الغربية'),
+  _Governorate('Monufia', 'المنوفية'),
+  _Governorate('Beheira', 'البحيرة'),
+  _Governorate('Ismailia', 'الإسماعيلية'),
+  _Governorate('Giza', 'الجيزة'),
+  _Governorate('Beni Suef', 'بني سويف'),
+  _Governorate('Fayoum', 'الفيوم'),
+  _Governorate('Minya', 'المنيا'),
+  _Governorate('Asyut', 'أسيوط'),
+  _Governorate('Sohag', 'سوهاج'),
+  _Governorate('Qena', 'قنا'),
+  _Governorate('Luxor', 'الأقصر'),
+  _Governorate('Aswan', 'أسوان'),
+  _Governorate('Red Sea', 'البحر الأحمر'),
+  _Governorate('New Valley', 'الوادي الجديد'),
+  _Governorate('Matrouh', 'مطروح'),
+  _Governorate('North Sinai', 'شمال سيناء'),
+  _Governorate('South Sinai', 'جنوب سيناء'),
+  _Governorate('Egyptians born abroad', 'المصريون المولودون بالخارج'),
+];
+
 class CaptainDocumentsScreen extends ConsumerStatefulWidget {
   const CaptainDocumentsScreen({super.key});
   @override
@@ -780,18 +1006,194 @@ class CaptainDocumentsScreen extends ConsumerStatefulWidget {
       _CaptainDocumentsScreenState();
 }
 
-class _CaptainDocumentsScreenState
-    extends ConsumerState<CaptainDocumentsScreen> {
-  late Future<Map<String, dynamic>> _profile;
-  String? _uploading;
+class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen> {
+  static const _background = Color(0xFFF7F8F5);
+  static const _primary = Color(0xFF176B55);
+  static const _fieldBorder = Color(0xFFE1E6E1);
+  static const int _stepCount = 3;
+  static const Map<String, String> _docFields = {
+    'identity': 'nationalIdDocument',
+    'license': 'licenseDocument',
+    'vehicle': 'vehicleDocument',
+  };
+
+  final _nationalId = TextEditingController();
+  final _phone = TextEditingController();
+  final _licenseNumber = TextEditingController();
+  final _registrationNumber = TextEditingController();
+
+  Map<String, dynamic> _profile = {};
+  bool _loading = true;
+  String? _loadError;
+  int _step = 0;
+  bool _submitting = false;
+  bool _isArabic = false;
+  String? _governorate;
+  NationalIdValidation? _nationalIdResult;
+  String? _nationalIdErrorText;
+  Uint8List? _pickedBytes;
+  String? _pickedName;
+  String? _pickedType;
 
   @override
   void initState() {
     super.initState();
-    _profile = ref.read(apiClientProvider).getMap('/captains/me');
+    _isArabic =
+        ref.read(preferencesProvider).getString('captain_docs_language') == 'ar';
+    _load();
   }
 
-  Future<void> _pickAndUpload(String type) async {
+  @override
+  void dispose() {
+    _nationalId.dispose();
+    _phone.dispose();
+    _licenseNumber.dispose();
+    _registrationNumber.dispose();
+    super.dispose();
+  }
+
+  String _t(String en, String ar) => _isArabic ? ar : en;
+
+  bool _uploaded(String type) {
+    final value = _profile[_docFields[type]];
+    return value is String && value != 'PENDING_UPLOAD';
+  }
+
+  bool _hasDocument(String type) => _uploaded(type) || _pickedType == type;
+
+  String? get _nationalIdLast4 {
+    final value = _profile['nationalIdLast4'];
+    return value is String && value.isNotEmpty ? value : null;
+  }
+
+  String? get _profilePhone {
+    final user = _profile['user'];
+    final phone = user is Map ? user['phone'] : null;
+    return phone is String && phone.trim().isNotEmpty ? phone : null;
+  }
+
+  DateTime? get _profileDob {
+    final raw = _profile['dateOfBirth'];
+    if (raw is String) return DateTime.tryParse(raw);
+    return null;
+  }
+
+  DateTime? get _shownDob => _nationalIdResult?.birthDate ?? _profileDob;
+
+  String? get _dobText {
+    final dob = _shownDob;
+    if (dob == null) return null;
+    return '${dob.year.toString().padLeft(4, '0')}-'
+        '${dob.month.toString().padLeft(2, '0')}-'
+        '${dob.day.toString().padLeft(2, '0')}';
+  }
+
+  bool get _personalComplete =>
+      _nationalIdLast4 != null &&
+      _profile['governorate'] is String &&
+      _profilePhone != null &&
+      _uploaded('identity');
+
+  bool get _licenseComplete =>
+      _profile['licenseNumber'] is String &&
+      (_profile['licenseNumber'] as String).isNotEmpty &&
+      _uploaded('license');
+
+  int _firstIncompleteStep() {
+    if (!_personalComplete) return 0;
+    if (!_licenseComplete) return 1;
+    return 2;
+  }
+
+  Future<void> _load() async {
+    try {
+      final profile = await ref.read(apiClientProvider).getMap('/captains/me');
+      if (!mounted) return;
+      final governorate = profile['governorate'];
+      final license = profile['licenseNumber'];
+      final registration = profile['vehicleRegistrationNumber'];
+      final user = profile['user'];
+      final phone = user is Map ? user['phone'] : null;
+      _licenseNumber.text = license is String ? license : '';
+      _registrationNumber.text = registration is String ? registration : '';
+      _phone.text = phone is String ? phone : '';
+      _profile = profile;
+      _governorate = _governorates.any((g) => g.name == governorate)
+          ? governorate as String
+          : null;
+      _step = _firstIncompleteStep();
+      setState(() => _loading = false);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = ApiClient.errorMessage(error);
+        _loading = false;
+      });
+    }
+  }
+
+  bool _validPhone(String value) {
+    final cleaned = value.replaceAll(RegExp(r'[\s-]'), '');
+    return RegExp(r'^0\d{9,10}$').hasMatch(cleaned);
+  }
+
+  String _nationalIdErrorMessage(NationalIdError error) {
+    switch (error) {
+      case NationalIdError.missing:
+        return _t('Enter your national ID', 'أدخل الرقم القومي');
+      case NationalIdError.length:
+        return _t(
+          'National ID must be 14 digits',
+          'الرقم القومي يجب أن يكون 14 رقمًا',
+        );
+      case NationalIdError.century:
+        return _t(
+          'National ID must start with 2 or 3',
+          'الرقم القومي يجب أن يبدأ بالرقم 2 أو 3',
+        );
+      case NationalIdError.date:
+        return _t(
+          'National ID has an invalid birth date',
+          'الرقم القومي يحتوي على تاريخ ميلاد غير صالح',
+        );
+      case NationalIdError.impossibleDate:
+        return _t(
+          'National ID has an impossible birth date',
+          'الرقم القومي يحتوي على تاريخ ميلاد غير منطقي',
+        );
+      case NationalIdError.governorate:
+        return _t(
+          'National ID has an invalid governorate code',
+          'الرقم القومي يحتوي على كود محافظة غير صحيح',
+        );
+      case NationalIdError.underage:
+        return _t(
+          'You must be at least 18 years old',
+          'يجب أن يكون عمرك 18 عامًا على الأقل',
+        );
+    }
+  }
+
+  void _onNationalIdChanged(String value) {
+    final typed = value.trim();
+    if (typed.length < 14) {
+      if (_nationalIdErrorText != null || _nationalIdResult != null) {
+        setState(() {
+          _nationalIdErrorText = null;
+          _nationalIdResult = null;
+        });
+      }
+      return;
+    }
+    final result = validateEgyptianNationalId(typed);
+    setState(() {
+      _nationalIdResult = result;
+      _nationalIdErrorText =
+          result.valid ? null : _nationalIdErrorMessage(result.error!);
+    });
+  }
+
+  Future<void> _pickFile(String type) async {
     final selection = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
@@ -800,122 +1202,569 @@ class _CaptainDocumentsScreenState
     if (selection == null || selection.files.isEmpty || !mounted) return;
     final file = selection.files.single;
     if (file.bytes == null) {
-      _showMessage(context, 'Could not read the selected document.');
+      _showMessage(
+        context,
+        _t('Could not read the selected document.', 'تعذر قراءة المستند المحدد.'),
+      );
       return;
     }
-    setState(() => _uploading = type);
+    setState(() {
+      _pickedBytes = file.bytes;
+      _pickedName = file.name;
+      _pickedType = type;
+    });
+  }
+
+  Future<void> _uploadPicked(String type) async {
+    if (_pickedType != type || _pickedBytes == null) return;
+    await ref
+        .read(apiClientProvider)
+        .uploadFile(
+          '/captains/documents/$type',
+          _pickedBytes!,
+          _pickedName ?? 'document',
+        );
+    _profile[_docFields[type]!] = 'uploaded';
+    _pickedBytes = null;
+    _pickedName = null;
+    _pickedType = null;
+  }
+
+  String _describeError(Object error) {
+    final dynamic exception = error;
     try {
-      await ref
-          .read(apiClientProvider)
-          .uploadFile('/captains/documents/$type', file.bytes!, file.name);
-      setState(() {
-        _profile = ref.read(apiClientProvider).getMap('/captains/me');
-      });
-      if (mounted) _showMessage(context, 'Document uploaded.');
+      final dynamic data = exception.response?.data;
+      if (data is Map) {
+        if (data['code'] == 'NATIONAL_ID_DUPLICATE') {
+          return _t(
+            'This national ID is already registered.',
+            'هذا الرقم القومي مسجل بالفعل.',
+          );
+        }
+        final message = data['message'];
+        if (message is List) return message.join('\n');
+        if (message is String && message.isNotEmpty) return message;
+      }
+    } catch (_) {
+      // Fall back to the generic message below.
+    }
+    return ApiClient.errorMessage(error);
+  }
+
+  bool _validateStep() {
+    if (_step == 0) {
+      final typed = _nationalId.text.trim();
+      if (typed.isEmpty) {
+        if (_nationalIdLast4 == null) {
+          setState(
+            () => _nationalIdErrorText = _nationalIdErrorMessage(
+              NationalIdError.missing,
+            ),
+          );
+          return false;
+        }
+      } else {
+        final result = validateEgyptianNationalId(typed);
+        if (!result.valid) {
+          setState(() {
+            _nationalIdResult = result;
+            _nationalIdErrorText = _nationalIdErrorMessage(result.error!);
+          });
+          return false;
+        }
+        _nationalIdResult = result;
+      }
+      if (_governorate == null) {
+        _showMessage(context, _t('Select your governorate.', 'اختر المحافظة.'));
+        return false;
+      }
+      if (!_validPhone(_phone.text)) {
+        _showMessage(
+          context,
+          _t('Enter a valid phone number.', 'أدخل رقم هاتف صحيحًا.'),
+        );
+        return false;
+      }
+      if (!_hasDocument('identity')) {
+        _showMessage(
+          context,
+          _t(
+            'Attach the national ID document.',
+            'أرفق صورة بطاقة الرقم القومي.',
+          ),
+        );
+        return false;
+      }
+      return true;
+    }
+    if (_step == 1) {
+      if (_licenseNumber.text.trim().isEmpty) {
+        _showMessage(context, _t('Enter your license number.', 'أدخل رقم الرخصة.'));
+        return false;
+      }
+      if (!_hasDocument('license')) {
+        _showMessage(
+          context,
+          _t(
+            'Attach the driving license document.',
+            'أرفق صورة رخصة القيادة.',
+          ),
+        );
+        return false;
+      }
+      return true;
+    }
+    if (_registrationNumber.text.trim().isEmpty) {
+      _showMessage(
+        context,
+        _t('Enter the vehicle registration number.', 'أدخل رقم تسجيل المركبة.'),
+      );
+      return false;
+    }
+    if (!_hasDocument('vehicle')) {
+      _showMessage(
+        context,
+        _t('Attach the vehicle registration document.', 'أرفق صورة رخصة المركبة.'),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _submit() async {
+    if (_submitting) return;
+    if (!_validateStep()) return;
+    setState(() => _submitting = true);
+    try {
+      final api = ref.read(apiClientProvider);
+      if (_step == 0) {
+        final typed = _nationalId.text.trim();
+        final data = <String, dynamic>{
+          'governorate': _governorate,
+          'phone': _phone.text.trim(),
+        };
+        if (typed.isNotEmpty) data['nationalId'] = typed;
+        await api.patch('/captains/me/profile', data: data);
+        await _uploadPicked('identity');
+        _profile['governorate'] = _governorate;
+        if (typed.isNotEmpty) {
+          _profile['nationalIdLast4'] = typed.substring(typed.length - 4);
+        }
+        final user = _profile['user'];
+        if (user is Map) user['phone'] = _phone.text.trim();
+      } else if (_step == 1) {
+        final license = _licenseNumber.text.trim();
+        await api.patch(
+          '/captains/me/profile',
+          data: {'licenseNumber': license},
+        );
+        await _uploadPicked('license');
+        _profile['licenseNumber'] = license;
+      } else {
+        final registration = _registrationNumber.text.trim();
+        await api.patch(
+          '/captains/me/profile',
+          data: {'vehicleRegistrationNumber': registration},
+        );
+        await _uploadPicked('vehicle');
+        _profile['vehicleRegistrationNumber'] = registration;
+      }
+      if (!mounted) return;
+      if (_step >= _stepCount - 1) {
+        ref.invalidate(captainProfileProvider);
+        _showMessage(
+          context,
+          _t('Submitted for review.', 'تم إرسال ملفك للمراجعة.'),
+        );
+        context.go('/');
+      } else {
+        setState(() => _step++);
+      }
     } catch (error) {
-      if (mounted) _showMessage(context, ApiClient.errorMessage(error));
+      if (mounted) _showMessage(context, _describeError(error));
     } finally {
-      if (mounted) setState(() => _uploading = null);
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _back() {
+    if (_submitting) return;
+    if (_step > 0) {
+      setState(() => _step--);
+    } else {
+      context.pop();
     }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Captain documents'),
-      leading: IconButton(
-        onPressed: () => context.pop(),
-        icon: const Icon(Icons.arrow_back),
+  Widget build(BuildContext context) => Directionality(
+    textDirection: _isArabic ? TextDirection.rtl : TextDirection.ltr,
+    child: Scaffold(
+      backgroundColor: _background,
+      appBar: AppBar(
+        backgroundColor: _background,
+        leading: IconButton(
+          onPressed: _back,
+          icon: Icon(_isArabic ? Icons.arrow_forward : Icons.arrow_back),
+        ),
+        title: Text(
+          _t('Captain verification', 'توثيق حساب المندوب'),
+          style: const TextStyle(
+            color: _ink,
+            fontWeight: FontWeight.w700,
+            fontSize: 17,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              final next = !_isArabic;
+              ref
+                  .read(preferencesProvider)
+                  .setString('captain_docs_language', next ? 'ar' : 'en');
+              setState(() => _isArabic = next);
+            },
+            child: Text(_isArabic ? 'English' : 'العربية'),
+          ),
+        ],
       ),
-    ),
-    body: FutureBuilder<Map<String, dynamic>>(
-      future: _profile,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: _ErrorBox(
-                message: ApiClient.errorMessage(snapshot.error!),
-              ),
-            ),
-          );
-        }
-        final profile = snapshot.data ?? {};
-        const documents = {
-          'identity': ('National ID', 'nationalIdDocument'),
-          'license': ('Driving license', 'licenseDocument'),
-          'vehicle': ('Vehicle registration', 'vehicleDocument'),
-        };
-        final complete = documents.values.every(
-          (entry) =>
-              profile[entry.$2] is String &&
-              profile[entry.$2] != 'PENDING_UPLOAD',
-        );
-        return ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            const Text(
-              'Verification documents',
-              style: TextStyle(
-                color: _ink,
-                fontSize: 23,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Add clear PDF or image files. Each file can be up to 8 MB.',
-              style: TextStyle(color: _muted, fontSize: 12),
-            ),
-            const SizedBox(height: 17),
-            for (final entry in documents.entries)
-              Builder(
-                builder: (context) {
-                  final uploaded = profile[entry.value.$2] != 'PENDING_UPLOAD';
-                  final busy = _uploading == entry.key;
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    decoration: _cardDecoration,
-                    child: ListTile(
-                      leading: Icon(
-                        uploaded ? Icons.check_circle : Icons.upload_file,
-                        color: uploaded ? _green : _muted,
-                      ),
-                      title: Text(entry.value.$1),
-                      subtitle: Text(uploaded ? 'Uploaded' : 'Required'),
-                      trailing: TextButton(
-                        onPressed: _uploading == null
-                            ? () => _pickAndUpload(entry.key)
-                            : null,
-                        child: Text(
-                          busy
-                              ? 'Uploading…'
-                              : uploaded
-                              ? 'Replace'
-                              : 'Add',
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            const SizedBox(height: 13),
-            _PrimaryButton(
-              label: complete
-                  ? 'Return to captain home'
-                  : 'Upload all documents to continue',
-              icon: Icons.check,
-              onPressed: complete ? () => context.go('/') : null,
-            ),
-          ],
-        );
-      },
+      body: _buildBody(),
     ),
   );
+
+  Widget _buildBody() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: _ErrorBox(message: _loadError!),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        _progress(),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+            children: _stepContent(),
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 16),
+            child: _PrimaryButton(
+              label: _step < _stepCount - 1
+                  ? _t('Next', 'التالي')
+                  : _t('Finish', 'إنهاء'),
+              icon: _isArabic ? Icons.arrow_back : Icons.arrow_forward,
+              busy: _submitting,
+              onPressed: _submitting ? null : _submit,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _progress() => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _t(
+            'Step ${_step + 1} of $_stepCount',
+            'الخطوة ${_step + 1} من $_stepCount',
+          ),
+          style: const TextStyle(
+            color: _muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            for (var i = 0; i < _stepCount; i++) ...[
+              Expanded(
+                child: Container(
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: i <= _step ? _primary : _fieldBorder,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              if (i < _stepCount - 1) const SizedBox(width: 6),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (var i = 0; i < _stepCount; i++)
+              Expanded(
+                child: Text(
+                  _stepName(i),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: i == _step ? _ink : _muted,
+                    fontSize: 10,
+                    fontWeight: i == _step
+                        ? FontWeight.w700
+                        : FontWeight.w500,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  String _stepName(int index) {
+    switch (index) {
+      case 0:
+        return _t('Personal', 'البيانات');
+      case 1:
+        return _t('License', 'الرخصة');
+      default:
+        return _t('Vehicle', 'المركبة');
+    }
+  }
+
+  List<Widget> _stepContent() {
+    switch (_step) {
+      case 0:
+        return _stepPersonal();
+      case 1:
+        return _stepLicense();
+      default:
+        return _stepVehicle();
+    }
+  }
+
+  Widget _stepHeader(String title, String subtitle) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(
+          color: _ink,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(subtitle, style: const TextStyle(color: _muted, fontSize: 12)),
+      const SizedBox(height: 18),
+    ],
+  );
+
+  List<Widget> _stepPersonal() => [
+    _stepHeader(
+      _t('Personal details', 'البيانات الشخصية'),
+      _t(
+        'Enter your national ID, governorate, and phone number.',
+        'أدخل الرقم القومي والمحافظة ورقم الهاتف.',
+      ),
+    ),
+    _textField(
+      controller: _nationalId,
+      label: _t('National ID (14 digits)', 'الرقم القومي (14 رقمًا)'),
+      icon: Icons.badge_outlined,
+      keyboardType: TextInputType.number,
+      maxLength: 14,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      errorText: _nationalIdErrorText,
+      helperText: _nationalIdLast4 != null
+          ? _t(
+              'On file: ••••${_nationalIdLast4!}',
+              'مسجل: ••••${_nationalIdLast4!}',
+            )
+          : null,
+      onChanged: _onNationalIdChanged,
+    ),
+    const SizedBox(height: 12),
+    _readOnlyField(
+      icon: Icons.cake_outlined,
+      label: _t('Date of birth', 'تاريخ الميلاد'),
+      value: _dobText,
+    ),
+    const SizedBox(height: 12),
+    _governorateField(),
+    const SizedBox(height: 12),
+    _textField(
+      controller: _phone,
+      label: _t('Phone number', 'رقم الهاتف'),
+      icon: Icons.phone_outlined,
+      keyboardType: TextInputType.phone,
+    ),
+    const SizedBox(height: 16),
+    _documentTile(
+      'identity',
+      _t('National ID document', 'بطاقة الرقم القومي'),
+      _t(
+        'A photo of the front and back of your ID',
+        'صورة بطاقة الرقم القومي (الوجهان)',
+      ),
+    ),
+  ];
+
+  List<Widget> _stepLicense() => [
+    _stepHeader(
+      _t('Driving license', 'رخصة القيادة'),
+      _t(
+        'Enter your license number and attach a clear photo.',
+        'أدخل رقم الرخصة وأرفق صورة واضحة.',
+      ),
+    ),
+    _textField(
+      controller: _licenseNumber,
+      label: _t('License number', 'رقم الرخصة'),
+      icon: Icons.directions_car_outlined,
+    ),
+    const SizedBox(height: 16),
+    _documentTile(
+      'license',
+      _t('License document', 'رخصة القيادة'),
+      _t('A photo of your driving license', 'صورة رخصة القيادة'),
+    ),
+  ];
+
+  List<Widget> _stepVehicle() => [
+    _stepHeader(
+      _t('Vehicle details', 'بيانات المركبة'),
+      _t(
+        'Confirm the vehicle and add its registration number.',
+        'أكد بيانات المركبة وأضف رقم التسجيل.',
+      ),
+    ),
+    _readOnlyField(
+      icon: Icons.two_wheeler_outlined,
+      label: _t('Vehicle type', 'نوع المركبة'),
+      value: _profile['vehicleType']?.toString(),
+    ),
+    const SizedBox(height: 12),
+    _readOnlyField(
+      icon: Icons.numbers_outlined,
+      label: _t('Vehicle plate', 'رقم اللوحة'),
+      value: _profile['vehiclePlate']?.toString(),
+    ),
+    const SizedBox(height: 12),
+    _textField(
+      controller: _registrationNumber,
+      label: _t(
+        'Vehicle registration number',
+        'رقم تسجيل المركبة',
+      ),
+      icon: Icons.assignment_outlined,
+    ),
+    const SizedBox(height: 16),
+    _documentTile(
+      'vehicle',
+      _t('Vehicle registration document', 'رخصة المركبة'),
+      _t('A photo of the vehicle registration', 'صورة رخصة تسيير المركبة'),
+    ),
+  ];
+
+  Widget _textField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType? keyboardType,
+    int? maxLength,
+    List<TextInputFormatter>? inputFormatters,
+    String? errorText,
+    String? helperText,
+    ValueChanged<String>? onChanged,
+  }) => TextField(
+    controller: controller,
+    keyboardType: keyboardType,
+    maxLength: maxLength,
+    inputFormatters: inputFormatters,
+    onChanged: onChanged,
+    decoration: InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon),
+      errorText: errorText,
+      helperText: helperText,
+      counterText: '',
+    ),
+  );
+
+  Widget _readOnlyField({
+    required IconData icon,
+    required String label,
+    String? value,
+  }) => InputDecorator(
+    decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+    child: Text(
+      value == null || value.isEmpty ? _t('Not provided', 'غير متوفر') : value,
+      style: const TextStyle(color: _ink, fontSize: 14),
+    ),
+  );
+
+  Widget _governorateField() => DropdownButtonFormField<String>(
+    initialValue: _governorate,
+    isExpanded: true,
+    decoration: InputDecoration(
+      labelText: _t('Governorate', 'المحافظة'),
+      prefixIcon: const Icon(Icons.map_outlined),
+    ),
+    hint: Text(_t('Select governorate', 'اختر المحافظة')),
+    items: [
+      for (final governorate in _governorates)
+        DropdownMenuItem(
+          value: governorate.name,
+          child: Text(_isArabic ? governorate.arabic : governorate.name),
+        ),
+    ],
+    onChanged: _submitting
+        ? null
+        : (value) => setState(() => _governorate = value),
+  );
+
+  Widget _documentTile(String type, String title, String subtitle) {
+    final uploaded = _uploaded(type);
+    final picked = _pickedType == type;
+    final ready = uploaded || picked;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: _cardDecoration,
+      child: ListTile(
+        leading: Icon(
+          ready ? Icons.check_circle : Icons.upload_file,
+          color: ready ? _green : _muted,
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: _ink,
+            fontSize: 14,
+          ),
+        ),
+        subtitle: Text(
+          picked
+              ? _t('Ready to upload', 'جاهز للرفع')
+              : uploaded
+              ? _t('Uploaded', 'تم الرفع')
+              : subtitle,
+          style: const TextStyle(color: _muted, fontSize: 11),
+        ),
+        trailing: TextButton(
+          onPressed: _submitting ? null : () => _pickFile(type),
+          child: Text(
+            ready ? _t('Replace', 'استبدال') : _t('Add', 'إضافة'),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _AvailableOrders extends ConsumerWidget {

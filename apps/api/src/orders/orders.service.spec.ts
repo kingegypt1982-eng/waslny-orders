@@ -18,6 +18,7 @@ describe('OrdersService wallet rules', () => {
     pricingSettings: { upsert: jest.fn() },
     wallet: { updateMany: jest.fn(), update: jest.fn() },
     walletTransaction: { create: jest.fn() },
+    user: { findUnique: jest.fn() },
   };
   const prisma = {
     $transaction: jest.fn(async (callback: any) => callback(tx)),
@@ -27,6 +28,7 @@ describe('OrdersService wallet rules', () => {
     purchaseInvoice: { findUnique: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
     captainProfile: { update: jest.fn() },
+    user: { findUnique: jest.fn() },
   };
   const redis = { nearbyCaptains: jest.fn(), updateCaptainLocation: jest.fn() };
   const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
@@ -46,6 +48,8 @@ describe('OrdersService wallet rules', () => {
     prisma.$transaction.mockImplementation(async (callback: any) => callback(tx));
     tx.pricingSettings.upsert.mockResolvedValue({ minimumWalletBalance: 0 });
     prisma.pricingSettings.upsert.mockResolvedValue({ basePrice: 30, pricePerKm: 8, commissionPercent: 10, minimumWalletBalance: 0, disabledCategories: [] });
+    prisma.user.findUnique.mockResolvedValue({ phone: '+201000000000' });
+    tx.user.findUnique.mockResolvedValue({ phone: '+201000000000' });
     policies.hasAcknowledgement.mockResolvedValue({ id: 'ack1' });
   });
 
@@ -233,6 +237,30 @@ describe('OrdersService wallet rules', () => {
         actorId: 'client1', actorRole: 'CLIENT',
       }),
     });
+  });
+
+  it('rejects order creation when the client phone is missing', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({ phone: null });
+    await expect(service.create('client1', {
+      pickupLabel: 'A', pickupLatitude: 30, pickupLongitude: 31,
+      deliveryLabel: 'B', deliveryLatitude: 30.1, deliveryLongitude: 31.1,
+      category: 'PACKAGE' as any, description: 'Box', recipientName: 'R', recipientPhone: '+201000000000',
+    })).rejects.toMatchObject({
+      status: 403,
+      response: expect.objectContaining({ code: 'PROFILE_INCOMPLETE', missing: ['phone'] }),
+    });
+    expect(tx.order.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects acceptance when the captain phone is missing', async () => {
+    tx.order.findUnique.mockResolvedValue({ id: 'o1', status: 'SEARCHING_CAPTAIN', captainId: null, commission: 15 });
+    tx.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    tx.user.findUnique.mockResolvedValueOnce({ phone: '  ' });
+    await expect(service.accept('o1', 'cap1')).rejects.toMatchObject({
+      status: 403,
+      response: expect.objectContaining({ code: 'PROFILE_INCOMPLETE' }),
+    });
+    expect(tx.wallet.updateMany).not.toHaveBeenCalled();
   });
 
   it('records an event when a captain accepts', async () => {

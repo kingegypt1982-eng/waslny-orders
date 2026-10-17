@@ -102,7 +102,8 @@ enum TopUpStatus {
 model User {
   id                 String              @id @default(cuid())
   email              String              @unique
-  passwordHash       String
+  googleId           String?             @unique
+  passwordHash       String?
   name               String
   phone              String?
   role               UserRole            @default(CLIENT)
@@ -119,6 +120,7 @@ model User {
   payments           PaymentIntent[]
   policyAcknowledgements PolicyAcknowledgement[]
   capturedInvoices   PurchaseInvoice[]   @relation("CapturedInvoices")
+  passwordResetTokens PasswordResetToken[]
 }
 
 model CaptainProfile {
@@ -130,6 +132,13 @@ model CaptainProfile {
   vehicleDocument    String        @default("PENDING_UPLOAD")
   vehicleType        String?
   vehiclePlate       String?
+  dateOfBirth        DateTime?
+  nationalIdEncrypted String?
+  nationalIdHash     String?       @unique
+  nationalIdLast4    String?
+  licenseNumber      String?       @unique
+  vehicleRegistrationNumber String?
+  governorate        String?
   rating             Float         @default(0)
   totalTrips         Int           @default(0)
   approvedAt         DateTime?
@@ -158,6 +167,20 @@ model Notification {
   metadata  Json?
   createdAt DateTime        @default(now())
   user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  /// SHA-256 hash of the raw token sent in the reset link (raw value is
+  /// never persisted, so a DB leak alone cannot reset passwords).
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
 }

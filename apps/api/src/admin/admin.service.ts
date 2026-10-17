@@ -13,6 +13,7 @@ import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { AdminTopUpsQueryDto } from '../topups/dto/admin-topups-query.dto';
 import { AdminAcknowledgementsQueryDto } from './dto/admin-acknowledgements-query.dto';
 import { resolveUploadPath } from '../orders/proof-upload';
+import { NationalIdCryptoService } from '../captains/national-id-crypto.service';
 
 @Injectable()
 export class AdminService {
@@ -20,6 +21,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly orderEvents: OrderEventsService,
+    private readonly crypto: NationalIdCryptoService,
   ) {}
 
   async dashboard() {
@@ -62,13 +64,27 @@ export class AdminService {
     });
   }
 
-  captains(query: AdminCaptainsQueryDto) {
-    return this.prisma.captainProfile.findMany({
+  async captains(query: AdminCaptainsQueryDto) {
+    const items = await this.prisma.captainProfile.findMany({
       where: query.status ? { status: query.status as CaptainStatus } : {},
       orderBy: { createdAt: 'desc' },
       include: {
         user: { select: { id: true, name: true, email: true, phone: true, wallet: true } },
       },
+    });
+    return items.map((c) => {
+      let nationalIdDecrypted: string | null = null;
+      if (c.nationalIdEncrypted) {
+        try {
+          nationalIdDecrypted = this.crypto.decrypt(c.nationalIdEncrypted);
+        } catch {
+          nationalIdDecrypted = null;
+        }
+      }
+      const rest = c as any;
+      delete rest.nationalIdEncrypted;
+      delete rest.nationalIdHash;
+      return { ...rest, nationalIdDecrypted, nationalIdLast4: c.nationalIdLast4 };
     });
   }
 

@@ -27,10 +27,12 @@ describe('AdminService', () => {
   const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
   const orderEvents = new OrderEventsService(prisma as unknown as PrismaService);
 
+  const crypto = { decrypt: jest.fn(), encrypt: jest.fn(), hash: jest.fn(), last4: jest.fn() };
   const service = new AdminService(
     prisma as unknown as PrismaService,
     notifications as unknown as NotificationsService,
     orderEvents,
+    crypto as any,
   );
 
   beforeEach(() => {

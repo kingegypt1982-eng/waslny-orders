@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/api_client.dart';
+import '../core/google_auth.dart';
 
 enum AccountType { client, captain }
 
@@ -114,6 +115,81 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  /// Exchanges a Google ID token for a Wasalny session. Shared by the native
+  /// and web Google buttons.
+  Future<void> _submitGoogle(String idToken) async {
+    FocusScope.of(context).unfocus();
+    setState(() => _isLoading = true);
+    try {
+      final role = _accountType == AccountType.client ? 'CLIENT' : 'CAPTAIN';
+      final api = ref.read(apiClientProvider);
+      final payload = await api.post(
+        '/auth/google',
+        data: {
+          'idToken': idToken,
+          'role': role,
+          if (_accountType == AccountType.captain &&
+              _vehicleTypeController.text.trim().isNotEmpty)
+            'vehicleType': _vehicleTypeController.text.trim(),
+          if (_accountType == AccountType.captain &&
+              _vehiclePlateController.text.trim().isNotEmpty)
+            'vehiclePlate': _vehiclePlateController.text.trim(),
+        },
+      );
+      await api.saveSession(payload);
+      ref.read(sessionProvider.notifier).state = Map<String, dynamic>.from(
+        payload['user'] as Map,
+      );
+      if (mounted) {
+        // Captains with missing data or documents land on documents next.
+        context.go(
+          _accountType == AccountType.captain ? '/captain-documents' : '/',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                googleAuthErrorMessage(error, isArabic: _isArabic),
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showGoogleCancelled() {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            googleAuthErrorMessage(
+              const GoogleAuthCancelled(),
+              isArabic: _isArabic,
+            ),
+          ),
+        ),
+      );
+  }
+
+  void _showGoogleError(Object error) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(googleAuthErrorMessage(error, isArabic: _isArabic)),
+          backgroundColor: Colors.red,
+        ),
+      );
   }
 
   void _openSignIn() {
@@ -378,6 +454,30 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                     ],
                                   ),
                           ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _localized(
+                            'Signing up as a ${_accountType == AccountType.captain ? 'captain' : 'client'}',
+                            'سيتم إنشاء حساب كـ ${_accountType == AccountType.captain ? 'مندوب' : 'عميل'}',
+                          ),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF829087),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        GoogleSignInButton(
+                          label: _localized(
+                            'Continue with Google',
+                            'المتابعة باستخدام جوجل',
+                          ),
+                          text: GoogleButtonText.signUp,
+                          locale: _isArabic ? 'ar' : null,
+                          busy: _isLoading,
+                          onIdToken: _submitGoogle,
+                          onCancel: _showGoogleCancelled,
+                          onError: _showGoogleError,
                         ),
                         const SizedBox(height: 24),
                         Center(

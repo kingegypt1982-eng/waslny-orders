@@ -31,6 +31,7 @@ describe('sensitive category acknowledgement on POST /orders', () => {
   const prisma = {
     $transaction: jest.fn(async (callback: any) => callback(tx)),
     pricingSettings: { upsert: jest.fn() },
+    user: { findUnique: jest.fn() },
   };
   const redis = { nearbyCaptains: jest.fn() };
   const notifications = { create: jest.fn() };
@@ -59,6 +60,7 @@ describe('sensitive category acknowledgement on POST /orders', () => {
       minimumWalletBalance: 0,
       disabledCategories: [],
     });
+    prisma.user.findUnique.mockResolvedValue({ phone: '+201000000000' });
     tx.order.create.mockImplementation(async ({ data }: any) => ({
       id: 'o9',
       ...data,

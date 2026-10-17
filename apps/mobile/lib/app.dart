@@ -10,6 +10,7 @@ import 'screens/notifications_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'screens/order_review_screen.dart';
 import 'screens/register_screen.dart';
+import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
 
 Future<void> bootstrap() async {
@@ -58,6 +59,12 @@ final routerProvider = Provider<GoRouter>(
           initialRole: state.uri.queryParameters['role'] == 'CAPTAIN'
               ? AccountType.captain
               : AccountType.client,
+        ),
+      ),
+      GoRoute(
+        path: '/reset-password',
+        builder: (context, state) => ResetPasswordScreen(
+          token: state.uri.queryParameters['token'] ?? '',
         ),
       ),
       GoRoute(
