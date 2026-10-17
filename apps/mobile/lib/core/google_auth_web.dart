@@ -85,9 +85,15 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
 
   Future<void> _init() async {
     if (googleWebClientId.isEmpty) {
-      widget.onError?.call(
-        const GoogleAuthException(GoogleAuthErrorKind.notConfigured),
-      );
+      // Report after the first frame: onError callbacks may surface a
+      // SnackBar, which must not run during this widget's build.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          widget.onError?.call(
+            const GoogleAuthException(GoogleAuthErrorKind.notConfigured),
+          );
+        }
+      });
       return;
     }
     try {

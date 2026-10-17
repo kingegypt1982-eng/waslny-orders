@@ -1,12 +1,13 @@
 import 'package:dio/dio.dart';
 
 /// Web OAuth client ID, injected at build/run time:
-/// `--dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>`.
+/// `--dart-define=GOOGLE_CLIENT_ID=<web-client-id>`.
 ///
+/// The legacy `GOOGLE_WEB_CLIENT_ID` name is still accepted as a fallback.
 /// It must be the same Web client ID the API verifies as the token audience.
 const googleWebClientId = String.fromEnvironment(
-  'GOOGLE_WEB_CLIENT_ID',
-  defaultValue: '',
+  'GOOGLE_CLIENT_ID',
+  defaultValue: String.fromEnvironment('GOOGLE_WEB_CLIENT_ID'),
 );
 
 /// Thrown when the user dismisses the platform account picker.
