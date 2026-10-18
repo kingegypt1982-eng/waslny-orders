@@ -4,6 +4,11 @@ import { NationalIdCryptoService } from './national-id-crypto.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
 
+jest.mock('fs', () => ({
+  ...jest.requireActual('fs'),
+  existsSync: jest.fn().mockReturnValue(true),
+  createReadStream: jest.fn().mockReturnValue('stream'),
+}));
 jest.mock('fs/promises', () => ({
   mkdir: jest.fn().mockResolvedValue(undefined),
   writeFile: jest.fn().mockResolvedValue(undefined),
@@ -96,6 +101,9 @@ describe('CaptainsController profile', () => {
       dateOfBirth: null,
       vehicleType: null,
       vehiclePlate: null,
+      vehicleMake: null,
+      vehicleColor: null,
+      profilePhotoDocument: 'PENDING_UPLOAD',
       user: { id: 'u1', name: 'Cap', email: 'c@x.com', phone: null, wallet: null },
     });
 
@@ -104,9 +112,54 @@ describe('CaptainsController profile', () => {
     expect(result.nationalIdHash).toBeUndefined();
     expect(result.nationalIdLast4).toBe('4567');
     expect(result.missing).toEqual(
-      expect.arrayContaining(['phone', 'governorate', 'licenseNumber', 'vehicleRegistrationNumber', 'dateOfBirth', 'vehicle']),
+      expect.arrayContaining([
+        'phone',
+        'governorate',
+        'licenseNumber',
+        'vehicleRegistrationNumber',
+        'dateOfBirth',
+        'vehicle',
+        'vehicleDetails',
+        'profilePhoto',
+      ]),
     );
     expect(result.missing).not.toContain('nationalId');
+  });
+
+  it('accepts vehicle make/model/color and plate through the profile update', async () => {
+    prisma.captainProfile.findFirst.mockResolvedValue(null);
+    prisma.captainProfile.update.mockImplementation(async ({ data }: any) => ({
+      id: 'p1',
+      userId: 'u1',
+      status: 'PENDING',
+      vehiclePlate: data.vehiclePlate,
+      vehicleMake: data.vehicleMake,
+      vehicleModel: data.vehicleModel,
+      vehicleColor: data.vehicleColor,
+      vehicleRegistrationNumber: data.vehicleRegistrationNumber,
+    }));
+
+    const result = (await controller.updateProfile(
+      { id: 'u1' },
+      {
+        vehicleRegistrationNumber: '12345',
+        vehiclePlate: '2173 ج ك ب',
+        vehicleMake: 'Honda',
+        vehicleModel: 'CB 1100',
+        vehicleColor: 'أبيض',
+      },
+    )) as any;
+
+    expect(result.vehicleRegistrationNumber).toBe('12345');
+    expect(result.vehiclePlate).toBe('2173 ج ك ب');
+    expect(result.vehicleMake).toBe('Honda');
+    expect(result.vehicleModel).toBe('CB 1100');
+    expect(result.vehicleColor).toBe('أبيض');
+
+    const stored = prisma.captainProfile.update.mock.calls[0][0].data;
+    expect(stored.vehiclePlate).toBe('2173 ج ك ب');
+    expect(stored.vehicleMake).toBe('Honda');
+    expect(stored.vehicleColor).toBe('أبيض');
   });
 
   it.each([
@@ -116,6 +169,7 @@ describe('CaptainsController profile', () => {
     ['license-back', 'licenseBackDocument'],
     ['vehicle', 'vehicleDocument'],
     ['vehicle-back', 'vehicleBackDocument'],
+    ['profile-photo', 'profilePhotoDocument'],
   ])('stores %s documents in the %s field', async (type, field) => {
     prisma.captainProfile.update.mockResolvedValue({});
     const file = { mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any;
@@ -132,6 +186,23 @@ describe('CaptainsController profile', () => {
     const file = { mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any;
     await expect(
       controller.uploadDocument({ id: 'u1' }, 'passport', file),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('GET /me/documents/:type serves the captain own uploaded document', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({
+      profilePhotoDocument: 'captains/u1/photo.jpg',
+    });
+    const stream = await controller.myDocument({ id: 'u1' }, 'profile-photo');
+    expect(stream).toBeDefined();
+  });
+
+  it('GET /me/documents/:type rejects un-uploaded documents', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({
+      profilePhotoDocument: 'PENDING_UPLOAD',
+    });
+    await expect(
+      controller.myDocument({ id: 'u1' }, 'profile-photo'),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

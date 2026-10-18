@@ -196,6 +196,7 @@ export class AdminService {
       'license-back': 'licenseBackDocument',
       vehicle: 'vehicleDocument',
       'vehicle-back': 'vehicleBackDocument',
+      'profile-photo': 'profilePhotoDocument',
     } as const;
     const field = fields[type as keyof typeof fields];
     if (!field) throw new NotFoundException('Document not found');

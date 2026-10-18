@@ -80,10 +80,14 @@ void main() {
         'nationalIdLast4': '2345',
         'nationalIdDocument': 'uploaded',
           'nationalIdBackDocument': 'uploaded',
+          'profilePhotoDocument': 'uploaded',
           'licenseNumber': null,
           'licenseDocument': 'uploaded',
           'licenseBackDocument': 'uploaded',
           'vehicleRegistrationNumber': null,
+          'vehiclePlate': null,
+          'vehicleMake': null,
+          'vehicleColor': null,
           'vehicleDocument': 'uploaded',
           'vehicleBackDocument': 'uploaded',
         'governorate': null,
@@ -124,14 +128,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Vehicle details'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).at(0), 'REG-123');
+    await tester.enterText(find.byType(TextField).at(0), '2173 ج ك ب');
+    await tester.enterText(find.byType(TextField).at(1), 'REG-123');
+    await tester.enterText(find.byType(TextField).at(2), 'Honda');
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Black').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Finish'));
     await tester.pumpAndSettle();
 
     expect(api.patches, [
       {'governorate': 'Cairo', 'phone': '01012345678'},
       {'licenseNumber': 'LIC-999'},
-      {'vehicleRegistrationNumber': 'REG-123'},
+      {
+        'vehicleRegistrationNumber': 'REG-123',
+        'vehiclePlate': '2173 ج ك ب',
+        'vehicleMake': 'Honda',
+        'vehicleColor': 'Black',
+      },
     ]);
     expect(router.routeInformationProvider.value.uri.path, '/');
     expect(find.text('home'), findsOneWidget);
@@ -149,10 +166,14 @@ void main() {
         'nationalIdLast4': null,
         'nationalIdDocument': 'uploaded',
           'nationalIdBackDocument': 'uploaded',
+          'profilePhotoDocument': 'uploaded',
           'licenseNumber': null,
           'licenseDocument': 'PENDING_UPLOAD',
           'licenseBackDocument': 'PENDING_UPLOAD',
           'vehicleRegistrationNumber': null,
+          'vehiclePlate': null,
+          'vehicleMake': null,
+          'vehicleColor': null,
           'vehicleDocument': 'PENDING_UPLOAD',
           'vehicleBackDocument': 'PENDING_UPLOAD',
         'governorate': null,
@@ -198,6 +219,259 @@ void main() {
     expect(find.text('Personal details'), findsOneWidget);
     expect(api.patches, isEmpty);
     expect(router.routeInformationProvider.value.uri.path, '/captain-documents');
+  });
+
+  testWidgets('vehicle step blocks finish without a plate, brand, or color', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _WizardApiClient(
+      preferences,
+      profile: {
+        'nationalIdLast4': '2345',
+        'nationalIdDocument': 'uploaded',
+        'nationalIdBackDocument': 'uploaded',
+        'profilePhotoDocument': 'uploaded',
+        'licenseNumber': 'LIC-999',
+        'licenseDocument': 'uploaded',
+        'licenseBackDocument': 'uploaded',
+        'vehicleRegistrationNumber': null,
+        'vehiclePlate': null,
+        'vehicleMake': null,
+        'vehicleColor': null,
+        'vehicleDocument': 'uploaded',
+        'vehicleBackDocument': 'uploaded',
+        'governorate': 'Cairo',
+        'dateOfBirth': null,
+        'user': {'phone': '01012345678'},
+      },
+    );
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = _wizardRouter();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Vehicle details'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).at(1), 'REG-123');
+    await tester.tap(find.text('Finish'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter a valid vehicle plate.'), findsOneWidget);
+    expect(api.patches, isEmpty);
+  });
+
+  testWidgets('vehicle step requires a brand after the plate', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _WizardApiClient(
+      preferences,
+      profile: {
+        'nationalIdLast4': '2345',
+        'nationalIdDocument': 'uploaded',
+        'nationalIdBackDocument': 'uploaded',
+        'profilePhotoDocument': 'uploaded',
+        'licenseNumber': 'LIC-999',
+        'licenseDocument': 'uploaded',
+        'licenseBackDocument': 'uploaded',
+        'vehicleRegistrationNumber': null,
+        'vehiclePlate': null,
+        'vehicleMake': null,
+        'vehicleColor': null,
+        'vehicleDocument': 'uploaded',
+        'vehicleBackDocument': 'uploaded',
+        'governorate': 'Cairo',
+        'dateOfBirth': null,
+        'user': {'phone': '01012345678'},
+      },
+    );
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = _wizardRouter();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), '2173 ج ك ب');
+    await tester.enterText(find.byType(TextField).at(1), 'REG-123');
+    await tester.tap(find.text('Finish'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter the motorcycle brand.'), findsOneWidget);
+    expect(api.patches, isEmpty);
+  });
+
+  testWidgets('vehicle step requires a color after the brand', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _WizardApiClient(
+      preferences,
+      profile: {
+        'nationalIdLast4': '2345',
+        'nationalIdDocument': 'uploaded',
+        'nationalIdBackDocument': 'uploaded',
+        'profilePhotoDocument': 'uploaded',
+        'licenseNumber': 'LIC-999',
+        'licenseDocument': 'uploaded',
+        'licenseBackDocument': 'uploaded',
+        'vehicleRegistrationNumber': null,
+        'vehiclePlate': null,
+        'vehicleMake': null,
+        'vehicleColor': null,
+        'vehicleDocument': 'uploaded',
+        'vehicleBackDocument': 'uploaded',
+        'governorate': 'Cairo',
+        'dateOfBirth': null,
+        'user': {'phone': '01012345678'},
+      },
+    );
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = _wizardRouter();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), '2173 ج ك ب');
+    await tester.enterText(find.byType(TextField).at(1), 'REG-123');
+    await tester.enterText(find.byType(TextField).at(2), 'Honda');
+    await tester.tap(find.text('Finish'));
+    await tester.pumpAndSettle();
+    expect(find.text('Select the motorcycle color.'), findsOneWidget);
+    expect(api.patches, isEmpty);
+  });
+
+  testWidgets('personal step blocks next without a selfie', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _WizardApiClient(
+      preferences,
+      profile: {
+        'nationalIdLast4': '2345',
+        'nationalIdDocument': 'uploaded',
+        'nationalIdBackDocument': 'uploaded',
+        'profilePhotoDocument': 'PENDING_UPLOAD',
+        'licenseNumber': null,
+        'licenseDocument': 'PENDING_UPLOAD',
+        'licenseBackDocument': 'PENDING_UPLOAD',
+        'vehicleRegistrationNumber': null,
+        'vehiclePlate': null,
+        'vehicleMake': null,
+        'vehicleColor': null,
+        'vehicleDocument': 'PENDING_UPLOAD',
+        'vehicleBackDocument': 'PENDING_UPLOAD',
+        'governorate': null,
+        'dateOfBirth': null,
+        'user': {'phone': ''},
+      },
+    );
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = _wizardRouter();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cairo').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(1), '01012345678');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Attach a personal photo (selfie).'), findsOneWidget);
+    expect(find.text('Personal details'), findsOneWidget);
+    expect(api.patches, isEmpty);
+  });
+
+  testWidgets('vehicle plate field is editable and shows Arabic hint', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _WizardApiClient(
+      preferences,
+      profile: {
+        'nationalIdLast4': '2345',
+        'nationalIdDocument': 'uploaded',
+        'nationalIdBackDocument': 'uploaded',
+        'profilePhotoDocument': 'uploaded',
+        'licenseNumber': 'LIC-999',
+        'licenseDocument': 'uploaded',
+        'licenseBackDocument': 'uploaded',
+        'vehicleRegistrationNumber': null,
+        'vehiclePlate': null,
+        'vehicleMake': null,
+        'vehicleColor': null,
+        'vehicleDocument': 'uploaded',
+        'vehicleBackDocument': 'uploaded',
+        'governorate': 'Cairo',
+        'dateOfBirth': null,
+        'user': {'phone': '01012345678'},
+      },
+    );
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = _wizardRouter();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Vehicle details'), findsOneWidget);
+    final plateField = tester.widget<TextField>(find.byType(TextField).at(0));
+    expect(plateField.textDirection, TextDirection.rtl);
+    expect(plateField.decoration?.hintText, contains('2173'));
+    expect(find.text('Vehicle license number'), findsOneWidget);
   });
 }
 

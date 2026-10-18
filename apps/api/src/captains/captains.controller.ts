@@ -1,12 +1,13 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
-import { BadRequestException, ConflictException, Param, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, StreamableFile, UseGuards } from '@nestjs/common';
+import { BadRequestException, ConflictException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { IsNumber, Max, Min } from 'class-validator';
 import { randomUUID } from 'crypto';
+import { existsSync, createReadStream } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
-import { dirname, join } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { memoryStorage } from 'multer';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
@@ -49,6 +50,8 @@ export class CaptainsController {
     if (!profile.vehicleRegistrationNumber) missing.push('vehicleRegistrationNumber');
     if (!profile.dateOfBirth) missing.push('dateOfBirth');
     if (!profile.vehicleType || !profile.vehiclePlate) missing.push('vehicle');
+    if (!profile.vehicleMake || !profile.vehicleColor) missing.push('vehicleDetails');
+    if (!profile.profilePhotoDocument || profile.profilePhotoDocument === 'PENDING_UPLOAD') missing.push('profilePhoto');
     const safe = { ...profile } as Record<string, unknown>;
     delete safe.nationalIdEncrypted;
     delete safe.nationalIdHash;
@@ -83,6 +86,31 @@ export class CaptainsController {
     return { type, uploaded: true };
   }
 
+  @Get('me/documents/:type')
+  async myDocument(@CurrentUser() user: { id: string }, @Param('type') type: string) {
+    const field = documentFields[type as keyof typeof documentFields];
+    if (!field) throw new BadRequestException('Unknown document type');
+    const profile = await this.prisma.captainProfile.findUnique({
+      where: { userId: user.id },
+      select: { [field]: true },
+    });
+    const storedPath = (profile as Record<string, string> | null)?.[field];
+    if (!storedPath || storedPath === 'PENDING_UPLOAD' || !storedPath.startsWith(`captains/${user.id}/`)) {
+      throw new BadRequestException('Document has not been uploaded');
+    }
+    const root = resolve(process.cwd(), 'uploads');
+    const path = resolve(root, storedPath);
+    if (!path.startsWith(`${root}/`) && !path.startsWith(`${root}\\`)) {
+      throw new BadRequestException('Document not found');
+    }
+    if (!existsSync(path)) throw new BadRequestException('Document file is missing');
+    const mimeType = path.endsWith('.pdf') ? 'application/pdf' : path.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    return new StreamableFile(createReadStream(path), {
+      type: mimeType,
+      disposition: `inline; filename="${basename(path)}"`,
+    });
+  }
+
   @Patch('me/profile')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async updateProfile(@CurrentUser() user: { id: string }, @Body() body: CaptainProfileUpdateDto) {
@@ -100,6 +128,18 @@ export class CaptainsController {
     }
     if (body.vehicleRegistrationNumber !== undefined) {
       data.vehicleRegistrationNumber = body.vehicleRegistrationNumber.trim() || null;
+    }
+    if (body.vehiclePlate !== undefined) {
+      data.vehiclePlate = body.vehiclePlate.trim() || null;
+    }
+    if (body.vehicleMake !== undefined) {
+      data.vehicleMake = body.vehicleMake.trim() || null;
+    }
+    if (body.vehicleModel !== undefined) {
+      data.vehicleModel = body.vehicleModel.trim() || null;
+    }
+    if (body.vehicleColor !== undefined) {
+      data.vehicleColor = body.vehicleColor.trim() || null;
     }
 
     if (body.dateOfBirth !== undefined) {
@@ -145,6 +185,10 @@ export class CaptainsController {
           governorate: true,
           licenseNumber: true,
           vehicleRegistrationNumber: true,
+          vehiclePlate: true,
+          vehicleMake: true,
+          vehicleModel: true,
+          vehicleColor: true,
           nationalIdLast4: true,
         },
       });
@@ -175,4 +219,5 @@ const documentFields = {
   'license-back': 'licenseBackDocument',
   vehicle: 'vehicleDocument',
   'vehicle-back': 'vehicleBackDocument',
+  'profile-photo': 'profilePhotoDocument',
 } as const;

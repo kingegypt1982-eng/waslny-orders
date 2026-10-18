@@ -23,6 +23,22 @@ export class CaptainProfileUpdateDto {
   vehicleRegistrationNumber?: string;
 
   @IsOptional()
+  @IsString()
+  vehiclePlate?: string;
+
+  @IsOptional()
+  @IsString()
+  vehicleMake?: string;
+
+  @IsOptional()
+  @IsString()
+  vehicleModel?: string;
+
+  @IsOptional()
+  @IsString()
+  vehicleColor?: string;
+
+  @IsOptional()
   @IsDateString()
   dateOfBirth?: string;
 }

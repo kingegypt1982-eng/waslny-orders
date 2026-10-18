@@ -135,6 +135,10 @@ model CaptainProfile {
   vehicleBackDocument    String    @default("PENDING_UPLOAD")
   vehicleType        String?
   vehiclePlate       String?
+  vehicleMake        String?
+  vehicleModel       String?
+  vehicleColor       String?
+  profilePhotoDocument String   @default("PENDING_UPLOAD")
   dateOfBirth        DateTime?
   nationalIdEncrypted String?
   nationalIdHash     String?       @unique

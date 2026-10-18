@@ -1028,6 +1028,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     'license-back': 'licenseBackDocument',
     'vehicle': 'vehicleDocument',
     'vehicle-back': 'vehicleBackDocument',
+    'profile-photo': 'profilePhotoDocument',
   };
   static const int _maxDocumentBytes = 8 * 1024 * 1024;
   static const List<String> _allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
@@ -1036,6 +1037,10 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   final _phone = TextEditingController();
   final _licenseNumber = TextEditingController();
   final _registrationNumber = TextEditingController();
+  final _plate = TextEditingController();
+  final _vehicleMake = TextEditingController();
+  final _vehicleModel = TextEditingController();
+  final _vehicleColor = TextEditingController();
 
   Map<String, dynamic> _profile = {};
   bool _loading = true;
@@ -1044,6 +1049,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   bool _submitting = false;
   bool _isArabic = false;
   String? _governorate;
+  String? _colorChoice;
   NationalIdValidation? _nationalIdResult;
   String? _nationalIdErrorText;
   final Map<String, _PickedDocument> _picked = {};
@@ -1062,10 +1068,23 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     _phone.dispose();
     _licenseNumber.dispose();
     _registrationNumber.dispose();
+    _plate.dispose();
+    _vehicleMake.dispose();
+    _vehicleModel.dispose();
+    _vehicleColor.dispose();
     super.dispose();
   }
 
   String _t(String en, String ar) => _isArabic ? ar : en;
+
+  static const Map<String, String> _colorOptions = {
+    'Black': 'أسود',
+    'White': 'أبيض',
+    'Red': 'أحمر',
+    'Blue': 'أزرق',
+    'Gray': 'رمادي',
+    'Other': 'أخرى',
+  };
 
   bool _uploaded(String type) {
     final value = _profile[_docFields[type]];
@@ -1106,7 +1125,8 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       _profile['governorate'] is String &&
       _profilePhone != null &&
       _uploaded('identity') &&
-      _uploaded('identity-back');
+      _uploaded('identity-back') &&
+      _uploaded('profile-photo');
 
   bool get _licenseComplete =>
       _profile['licenseNumber'] is String &&
@@ -1127,10 +1147,18 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       final governorate = profile['governorate'];
       final license = profile['licenseNumber'];
       final registration = profile['vehicleRegistrationNumber'];
+      final plate = profile['vehiclePlate'];
+      final make = profile['vehicleMake'];
+      final model = profile['vehicleModel'];
+      final color = profile['vehicleColor'];
       final user = profile['user'];
       final phone = user is Map ? user['phone'] : null;
       _licenseNumber.text = license is String ? license : '';
       _registrationNumber.text = registration is String ? registration : '';
+      _plate.text = plate is String ? plate : '';
+      _vehicleMake.text = make is String ? make : '';
+      _vehicleModel.text = model is String ? model : '';
+      _colorChoice = color is String && color.isNotEmpty ? color : null;
       _phone.text = phone is String ? phone : '';
       _profile = profile;
       _governorate = _governorates.any((g) => g.name == governorate)
@@ -1408,6 +1436,16 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
         );
         return false;
       }
+      if (!_hasDocument('profile-photo')) {
+        _showMessage(
+          context,
+          _t(
+            'Attach a personal photo (selfie).',
+            'أرفق صورة شخصية (سيلفي).',
+          ),
+        );
+        return false;
+      }
       return true;
     }
     if (_step == 1) {
@@ -1440,7 +1478,29 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     if (_registrationNumber.text.trim().isEmpty) {
       _showMessage(
         context,
-        _t('Enter the vehicle registration number.', 'أدخل رقم تسجيل المركبة.'),
+        _t('Enter the vehicle license number.', 'أدخل رقم رخصة المركبة.'),
+      );
+      return false;
+    }
+    final plateText = _plate.text.trim();
+    if (plateText.isEmpty || plateText.length < 3) {
+      _showMessage(
+        context,
+        _t('Enter a valid vehicle plate.', 'أدخل رقم لوحة المركبة بشكل صحيح.'),
+      );
+      return false;
+    }
+    if (_vehicleMake.text.trim().isEmpty) {
+      _showMessage(
+        context,
+        _t('Enter the motorcycle brand.', 'أدخل ماركة الموتوسيكل.'),
+      );
+      return false;
+    }
+    if (_colorChoice == null || _colorChoice!.isEmpty) {
+      _showMessage(
+        context,
+        _t('Select the motorcycle color.', 'اختر لون الموتوسيكل.'),
       );
       return false;
     }
@@ -1477,6 +1537,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
         await api.patch('/captains/me/profile', data: data);
         await _uploadPicked('identity');
         await _uploadPicked('identity-back');
+        await _uploadPicked('profile-photo');
         _profile['governorate'] = _governorate;
         if (typed.isNotEmpty) {
           _profile['nationalIdLast4'] = typed.substring(typed.length - 4);
@@ -1494,13 +1555,26 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
         _profile['licenseNumber'] = license;
       } else {
         final registration = _registrationNumber.text.trim();
+        final plate = _plate.text.trim();
+        final make = _vehicleMake.text.trim();
+        final model = _vehicleModel.text.trim();
         await api.patch(
           '/captains/me/profile',
-          data: {'vehicleRegistrationNumber': registration},
+          data: {
+            'vehicleRegistrationNumber': registration,
+            'vehiclePlate': plate,
+            'vehicleMake': make,
+            if (model.isNotEmpty) 'vehicleModel': model,
+            'vehicleColor': _colorChoice,
+          },
         );
         await _uploadPicked('vehicle');
         await _uploadPicked('vehicle-back');
         _profile['vehicleRegistrationNumber'] = registration;
+        _profile['vehiclePlate'] = plate;
+        _profile['vehicleMake'] = make;
+        _profile['vehicleModel'] = model;
+        _profile['vehicleColor'] = _colorChoice;
       }
       if (!mounted) return;
       if (_step >= _stepCount - 1) {
@@ -1747,6 +1821,14 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       _t('National ID (back)', 'بطاقة الرقم القومي (الظهر)'),
       _t('A clear photo of the back of your ID', 'صورة واضحة لظهر البطاقة'),
     ),
+    _documentTile(
+      'profile-photo',
+      _t('Personal photo (selfie)', 'صورة شخصية (سيلفي)'),
+      _t(
+        'A clear front-facing photo of yourself',
+        'صورة واضحة لوجهك من الأمام',
+      ),
+    ),
   ];
 
   List<Widget> _stepLicense() => [
@@ -1779,8 +1861,8 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     _stepHeader(
       _t('Vehicle details', 'بيانات المركبة'),
       _t(
-        'Confirm the vehicle and add its registration number.',
-        'أكد بيانات المركبة وأضف رقم التسجيل.',
+        'Confirm the vehicle and add its license and plate details.',
+        'أكد بيانات المركبة وأضف رقم الرخصة واللوحة.',
       ),
     ),
     _readOnlyField(
@@ -1789,20 +1871,34 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       value: _profile['vehicleType']?.toString(),
     ),
     const SizedBox(height: 12),
-    _readOnlyField(
-      icon: Icons.numbers_outlined,
-      label: _t('Vehicle plate', 'رقم اللوحة'),
-      value: _profile['vehiclePlate']?.toString(),
-    ),
+    _vehiclePlateField(),
     const SizedBox(height: 12),
     _textField(
       controller: _registrationNumber,
       label: _t(
-        'Vehicle registration number',
-        'رقم تسجيل المركبة',
+        'Vehicle license number',
+        'رقم رخصة المركبة',
       ),
       icon: Icons.assignment_outlined,
     ),
+    const SizedBox(height: 12),
+    _textField(
+      controller: _vehicleMake,
+      label: _t('Brand', 'الماركة'),
+      icon: Icons.two_wheeler_outlined,
+      helperText: _t(
+        'e.g. Honda, Yamaha, Suzuki',
+        'مثال: هوندا، ياماها، سوزوكي',
+      ),
+    ),
+    const SizedBox(height: 12),
+    _textField(
+      controller: _vehicleModel,
+      label: _t('Model (optional)', 'الموديل (اختياري)'),
+      icon: Icons.crop_landscape_outlined,
+    ),
+    const SizedBox(height: 12),
+    _colorDropdownField(),
     const SizedBox(height: 16),
     _documentTile(
       'vehicle',
@@ -1871,6 +1967,36 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     onChanged: _submitting
         ? null
         : (value) => setState(() => _governorate = value),
+  );
+
+  Widget _vehiclePlateField() => TextField(
+    controller: _plate,
+    textDirection: TextDirection.rtl,
+    decoration: InputDecoration(
+      labelText: _t('Vehicle plate', 'رقم اللوحة'),
+      hintText: _t('e.g. 2173 ج ك ب', 'مثال: 2173 ج ك ب'),
+      prefixIcon: const Icon(Icons.numbers_outlined),
+    ),
+  );
+
+  Widget _colorDropdownField() => DropdownButtonFormField<String>(
+    initialValue: _colorChoice,
+    isExpanded: true,
+    decoration: InputDecoration(
+      labelText: _t('Color', 'اللون'),
+      prefixIcon: const Icon(Icons.palette_outlined),
+    ),
+    hint: Text(_t('Select color', 'اختر اللون')),
+    items: [
+      for (final entry in _colorOptions.entries)
+        DropdownMenuItem(
+          value: entry.key,
+          child: Text(_isArabic ? entry.value : entry.key),
+        ),
+    ],
+    onChanged: _submitting
+        ? null
+        : (value) => setState(() => _colorChoice = value),
   );
 
   Widget _documentTile(String type, String title, String subtitle) {
