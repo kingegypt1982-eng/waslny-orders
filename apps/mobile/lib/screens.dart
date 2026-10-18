@@ -39,7 +39,9 @@ class WelcomeScreen extends ConsumerWidget {
     String role,
   ) async {
     await ref.read(preferencesProvider).setString('selected_role', role);
-    if (context.mounted) context.push('/register?role=$role');
+    if (context.mounted) {
+      context.push(role == 'CAPTAIN' ? '/captain-start' : '/register?role=$role');
+    }
   }
 
   @override

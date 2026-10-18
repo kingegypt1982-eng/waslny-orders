@@ -29,6 +29,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _hidePassword = true;
   bool _isLoading = false;
   bool _isArabic = false;
+  bool _termsAccepted = false;
+  Map<String, dynamic>? _termsPolicy;
 
   static const Color primary = Color(0xFF176B55);
   static const Color background = Color(0xFFF7F8F5);
@@ -42,7 +44,84 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   void initState() {
     super.initState();
     _accountType = widget.initialRole;
+    _loadTermsPolicy();
   }
+
+  Future<void> _loadTermsPolicy() async {
+    final type = _accountType == AccountType.captain
+        ? 'TERMS_CAPTAIN'
+        : 'TERMS_CLIENT';
+    try {
+      final policy = await ref.read(apiClientProvider).getMap('/policies/$type');
+      if (mounted) setState(() => _termsPolicy = policy);
+    } catch (_) {
+      // Terms text is optional; the checkbox still gates registration.
+    }
+  }
+
+  void _showTermsSheet() {
+    final policy = _termsPolicy;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => Directionality(
+        textDirection: _isArabic ? TextDirection.rtl : TextDirection.ltr,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    policy?['title']?.toString() ??
+                        _localized('Terms & Conditions', 'الشروط والأحكام'),
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    policy?['text']?.toString() ??
+                        _localized(
+                          'The terms text could not be loaded. You can still '
+                          'agree to continue.',
+                          'تعذر تحميل نص الشروط. يمكنك الموافقة للمتابعة.',
+                        ),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF536159),
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text(_localized('Close', 'إغلاق')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool get _termsReady => _termsAccepted;
 
   @override
   void dispose() {
@@ -59,6 +138,22 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     FocusScope.of(context).unfocus();
 
     if (!_formKey.currentState!.validate()) return;
+    if (!_termsReady) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              _localized(
+                'Please accept the terms and conditions to continue.',
+                'يرجى الموافقة على الشروط والأحكام للمتابعة.',
+              ),
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      return;
+    }
 
     setState(() => _isLoading = true);
     try {
@@ -82,6 +177,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       ref.read(sessionProvider.notifier).state = Map<String, dynamic>.from(
         payload['user'] as Map,
       );
+      await _acknowledgeTerms();
 
       if (mounted) {
         context.go(
@@ -121,6 +217,22 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   /// and web Google buttons.
   Future<void> _submitGoogle(String idToken) async {
     FocusScope.of(context).unfocus();
+    if (!_termsReady) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              _localized(
+                'Please accept the terms and conditions to continue.',
+                'يرجى الموافقة على الشروط والأحكام للمتابعة.',
+              ),
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       final role = _accountType == AccountType.client ? 'CLIENT' : 'CAPTAIN';
@@ -142,6 +254,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       ref.read(sessionProvider.notifier).state = Map<String, dynamic>.from(
         payload['user'] as Map,
       );
+      await _acknowledgeTerms();
       if (mounted) {
         // Captains with missing data or documents land on documents next.
         context.go(
@@ -190,6 +303,24 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           backgroundColor: Colors.red,
         ),
       );
+  }
+
+  /// Records the accepted terms on the server. Best-effort: the API also
+  /// verifies acknowledgement when a captain accepts an order.
+  Future<void> _acknowledgeTerms() async {
+    final version = _termsPolicy?['version']?.toString();
+    if (version == null || version.isEmpty) return;
+    final type = _accountType == AccountType.captain
+        ? 'TERMS_CAPTAIN'
+        : 'TERMS_CLIENT';
+    try {
+      await ref.read(apiClientProvider).post(
+        '/acknowledgements',
+        data: {'type': type, 'policyVersion': version},
+      );
+    } catch (_) {
+      // Non-fatal; order acceptance re-checks and reports missing terms.
+    }
   }
 
   void _openSignIn() {
@@ -408,7 +539,60 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                             return null;
                           },
                         ),
-                        const SizedBox(height: 22),
+                        const SizedBox(height: 18),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Checkbox(
+                                value: _termsAccepted,
+                                onChanged: (value) => setState(
+                                  () => _termsAccepted = value ?? false,
+                                ),
+                                activeColor: primary,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Wrap(
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Text(
+                                    _localized(
+                                      'I agree to the ',
+                                      'أوافق على ',
+                                    ),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: _showTermsSheet,
+                                    child: Text(
+                                      _localized(
+                                        'terms & conditions',
+                                        'الشروط والأحكام',
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: primary,
+                                        decoration: TextDecoration.underline,
+                                        decorationColor: primary,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
                         SizedBox(
                           width: double.infinity,
                           height: 46,
@@ -528,6 +712,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         setState(() {
           _accountType = type;
         });
+        _loadTermsPolicy();
       },
       borderRadius: BorderRadius.circular(24),
       child: Container(

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
 import 'screens.dart';
+import 'screens/captain_start_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'screens/order_review_screen.dart';
@@ -86,6 +87,10 @@ final routerProvider = Provider<GoRouter>(
             quote: Map<String, dynamic>.from(extra['quote'] as Map),
           );
         },
+      ),
+      GoRoute(
+        path: '/captain-start',
+        builder: (context, state) => const CaptainStartScreen(),
       ),
       GoRoute(
         path: '/captain-documents',

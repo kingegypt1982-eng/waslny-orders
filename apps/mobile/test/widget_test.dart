@@ -56,6 +56,12 @@ void main() {
     await tester.tap(find.text('مندوب'));
     await tester.pumpAndSettle();
 
+    // Captain role now opens the review-only start screen first.
+    expect(find.text('انضم كمندوب توصيل'), findsOneWidget);
+    expect(find.text('المستندات المطلوبة'), findsOneWidget);
+    await tester.tap(find.text('ابدأ التسجيل'));
+    await tester.pumpAndSettle();
+
     expect(
       tester.widget<RegisterScreen>(find.byType(RegisterScreen)).initialRole,
       AccountType.captain,
@@ -169,6 +175,8 @@ void main() {
     );
     await tester.enterText(find.byType(TextFormField).at(5), 'Password123');
     await tester.ensureVisible(find.text('Create account'));
+    await tester.tap(find.byType(Checkbox));
+    await tester.pump();
     await tester.tap(find.text('Create account'));
     await tester.pumpAndSettle();
 
@@ -231,6 +239,8 @@ void main() {
     );
     await tester.enterText(find.byType(TextFormField).at(3), 'Password123');
     await tester.ensureVisible(find.text('Create account'));
+    await tester.tap(find.byType(Checkbox));
+    await tester.pump();
     await tester.tap(find.text('Create account'));
     await tester.pumpAndSettle();
 
@@ -267,6 +277,8 @@ void main() {
     );
     await tester.enterText(find.byType(TextFormField).at(3), 'Password123');
     await tester.ensureVisible(find.text('Create account'));
+    await tester.tap(find.byType(Checkbox));
+    await tester.pump();
     await tester.tap(find.text('Create account'));
     await tester.pumpAndSettle();
 
@@ -299,6 +311,90 @@ void main() {
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       2,
     );
+  });
+
+  testWidgets('captain start screen lists requirements and opens register', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [preferencesProvider.overrideWithValue(preferences)],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider);
+    router.go('/captain-start');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('انضم كمندوب توصيل'), findsOneWidget);
+    expect(find.text('المستندات المطلوبة'), findsOneWidget);
+    expect(find.text('رقم قومي ساري المفعول'), findsOneWidget);
+    expect(find.text('رخصة قيادة سارية'), findsOneWidget);
+    expect(find.text('مركبة بلوحات مصرية'), findsOneWidget);
+    expect(find.text('صورة شخصية حديثة'), findsOneWidget);
+
+    await tester.tap(find.text('ابدأ التسجيل'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<RegisterScreen>(find.byType(RegisterScreen)).initialRole,
+      AccountType.captain,
+    );
+  });
+
+  testWidgets('registration blocks submit until terms are accepted', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final api = _TestApiClient(preferences, role: 'CLIENT');
+    final container = ProviderContainer(
+      overrides: [
+        preferencesProvider.overrideWithValue(preferences),
+        apiClientProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider);
+    router.go('/register');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), 'Client User');
+    await tester.enterText(find.byType(TextFormField).at(1), '01012345678');
+    await tester.enterText(
+      find.byType(TextFormField).at(2),
+      'client@example.com',
+    );
+    await tester.enterText(find.byType(TextFormField).at(3), 'Password123');
+    await tester.ensureVisible(find.text('Create account'));
+    await tester.tap(find.text('Create account'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Please accept the terms and conditions to continue.'),
+      findsOneWidget,
+    );
+    expect(api.requestPath, isNull);
+
+    await tester.tap(find.byType(Checkbox));
+    await tester.pump();
+    await tester.tap(find.text('Create account'));
+    await tester.pumpAndSettle();
+
+    expect(api.requestPath, '/auth/register');
+    expect(router.routeInformationProvider.value.uri.path, '/');
   });
 
   testWidgets('splash appears first, then signed-out users see welcome', (
