@@ -792,21 +792,7 @@ class CaptainHome extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              FutureBuilder<Map<String, dynamic>>(
-                future: api.getMap('/captains/me'),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting)
-                    return const LinearProgressIndicator();
-                  if (snapshot.hasError)
-                    return _ErrorBox(
-                      message: ApiClient.errorMessage(snapshot.error!),
-                    );
-                  final status =
-                      snapshot.data?['status'] as String? ?? 'PENDING';
-                  if (status != 'ACTIVE') return _ApprovalPanel(status: status);
-                  return const _AvailableOrders();
-                },
-              ),
+              const _CaptainStatusSection(),
             ],
           ),
         ),
@@ -815,9 +801,63 @@ class CaptainHome extends ConsumerWidget {
   }
 }
 
+/// Loads the captain profile through [captainProfileProvider] so the
+/// pull-to-refresh of CaptainHome actually refetches it, and polls lightly
+/// while the application is not approved yet.
+class _CaptainStatusSection extends ConsumerStatefulWidget {
+  const _CaptainStatusSection();
+  @override
+  ConsumerState<_CaptainStatusSection> createState() =>
+      _CaptainStatusSectionState();
+}
+
+class _CaptainStatusSectionState extends ConsumerState<_CaptainStatusSection> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      final async = ref.read(captainProfileProvider);
+      final status = async.valueOrNull?['status'] as String? ?? 'PENDING';
+      if (status != 'ACTIVE') ref.invalidate(captainProfileProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final profile = ref.watch(captainProfileProvider);
+    return profile.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: LinearProgressIndicator(),
+      ),
+      error: (error, _) => _ErrorBox(message: ApiClient.errorMessage(error)),
+      data: (data) {
+        final status = data['status'] as String? ?? 'PENDING';
+        if (status != 'ACTIVE') {
+          return _ApprovalPanel(
+            status: status,
+            rejectionReason: data['rejectionReason'] as String?,
+          );
+        }
+        return const _AvailableOrders();
+      },
+    );
+  }
+}
+
 class _ApprovalPanel extends StatelessWidget {
-  const _ApprovalPanel({required this.status});
+  const _ApprovalPanel({required this.status, this.rejectionReason});
   final String status;
+  final String? rejectionReason;
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(19),
@@ -851,11 +891,49 @@ class _ApprovalPanel extends StatelessWidget {
           'The Wasalny team will review your documents. You can accept deliveries once your captain profile is approved.',
           style: TextStyle(color: _muted, height: 1.45, fontSize: 12),
         ),
+        if (status == 'REJECTED' && (rejectionReason ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 11),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFDECEA),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFF4D4CE)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Rejection reason',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF8E4B3F),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  rejectionReason!.trim(),
+                  style: const TextStyle(
+                    color: Color(0xFF7A5248),
+                    height: 1.4,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 13),
         OutlinedButton.icon(
           onPressed: () => context.push('/captain-documents'),
           icon: const Icon(Icons.upload_file_outlined, size: 17),
-          label: const Text('Upload captain documents'),
+          label: Text(
+            status == 'REJECTED'
+                ? 'Edit and resubmit documents'
+                : 'Upload captain documents',
+          ),
         ),
       ],
     ),
