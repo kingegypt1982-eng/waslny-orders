@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
 import 'core/google_auth.dart';
 import 'core/json_utils.dart';
+import 'screens/captain_availability_screen.dart';
 import 'screens/forgot_password.dart';
 import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
@@ -742,16 +743,19 @@ class ClientHome extends ConsumerWidget {
 class CaptainHome extends ConsumerWidget {
   const CaptainHome({super.key, required this.user});
   final Map<String, dynamic> user;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final api = ref.watch(apiClientProvider);
+    final profile = ref.watch(captainProfileProvider);
+    final status = profile.valueOrNull?['status'] as String?;
+    // Approved captains land on the delivery screen itself: an OpenStreetMap
+    // view of their live offers, with the online switch and service radius on
+    // top. Pending/rejected captains keep the approval panel.
+    if (status == 'ACTIVE') return const CaptainAvailabilityView();
     return Scaffold(
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(captainProfileProvider);
-            ref.invalidate(availableOrdersProvider);
-          },
+          onRefresh: () async => ref.invalidate(captainProfileProvider),
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
             children: [
@@ -760,49 +764,8 @@ class CaptainHome extends ConsumerWidget {
                 subtitle: 'Your next delivery starts here.',
                 icon: Icons.notifications_none,
               ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () async {
-                    final result = await context.push<Map<String, dynamic>>(
-                      '/map-picker?title=Set%20delivery%20area',
-                    );
-                    if (result == null || !context.mounted) return;
-                    final point = LatLng(
-                      asDouble(result['lat']),
-                      asDouble(result['lon']),
-                    );
-                    ref.read(captainLocationProvider.notifier).state = point;
-                    try {
-                      await api.post(
-                        '/captains/location',
-                        data: {
-                          'latitude': point.latitude,
-                          'longitude': point.longitude,
-                        },
-                      );
-                      ref.invalidate(availableOrdersProvider);
-                    } catch (error) {
-                      if (context.mounted) {
-                        _showMessage(context, ApiClient.errorMessage(error));
-                      }
-                    }
-                  },
-                  icon: const Icon(Icons.location_searching, size: 16),
-                  label: const Text('Set my delivery area'),
-                ),
-              ),
               const SizedBox(height: 18),
               const _CaptainStatusSection(),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => context.push('/captain/availability'),
-                  icon: const Icon(Icons.wifi_tethering, size: 16),
-                  label: const Text('حالة التوفر والطلبات القريبة'),
-                ),
-              ),
             ],
           ),
         ),
@@ -811,9 +774,8 @@ class CaptainHome extends ConsumerWidget {
   }
 }
 
-/// Loads the captain profile through [captainProfileProvider] so the
-/// pull-to-refresh of CaptainHome actually refetches it, and polls lightly
-/// while the application is not approved yet.
+/// Shows the approval panel and polls lightly until the captain is approved,
+/// so the screen swaps to the delivery view without a manual refresh.
 class _CaptainStatusSection extends ConsumerStatefulWidget {
   const _CaptainStatusSection();
   @override
@@ -850,16 +812,10 @@ class _CaptainStatusSectionState extends ConsumerState<_CaptainStatusSection> {
         child: LinearProgressIndicator(),
       ),
       error: (error, _) => _ErrorBox(message: ApiClient.errorMessage(error)),
-      data: (data) {
-        final status = data['status'] as String? ?? 'PENDING';
-        if (status != 'ACTIVE') {
-          return _ApprovalPanel(
-            status: status,
-            rejectionReason: data['rejectionReason'] as String?,
-          );
-        }
-        return const _AvailableOrders();
-      },
+      data: (data) => _ApprovalPanel(
+        status: data['status'] as String? ?? 'PENDING',
+        rejectionReason: data['rejectionReason'] as String?,
+      ),
     );
   }
 }
@@ -2128,152 +2084,9 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   }
 }
 
-class _AvailableOrders extends ConsumerWidget {
-  const _AvailableOrders();
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final ordersState = ref.watch(availableOrdersProvider);
-    return ordersState.when(
-      loading: () => const Center(
-        child: Padding(
-          padding: EdgeInsets.all(30),
-          child: CircularProgressIndicator(),
-        ),
-      ),
-      error: (error, _) => _ErrorBox(message: ApiClient.errorMessage(error)),
-      data: (orders) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionTitle(title: 'Nearby deliveries'),
-            const SizedBox(height: 10),
-            if (orders.isEmpty)
-              const _EmptyState(
-                icon: Icons.near_me_outlined,
-                title: 'No orders nearby',
-                subtitle:
-                    'New requests will appear here when they match your area.',
-              ),
-            for (final item in orders)
-              _AvailableOrderCard(
-                order: Map<String, dynamic>.from(item as Map),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _AvailableOrderCard extends ConsumerWidget {
-  const _AvailableOrderCard({required this.order});
-  final Map<String, dynamic> order;
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final api = ref.watch(apiClientProvider);
-    final busy = ref.watch(orderActionProvider);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(15),
-      decoration: _cardDecoration,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.inventory_2_outlined, size: 18, color: _green),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '${order['category'] ?? 'SHIPMENT'} · ${order['reference'] ?? ''}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: _ink,
-                  ),
-                ),
-              ),
-              Text(
-                'EGP ${order['price']}',
-                style: const TextStyle(
-                  color: _green,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _RouteLine(
-            pickup: order['pickupLabel'] as String? ?? '',
-            delivery: order['deliveryLabel'] as String? ?? '',
-          ),
-          const SizedBox(height: 12),
-          Directionality(
-            textDirection: TextDirection.rtl,
-            child: Column(
-              children: [
-                _MoneyRow(label: 'رسوم التوصيل', value: _egp(order['price'])),
-                const SizedBox(height: 6),
-                _MoneyRow(
-                  label: 'عمولة الشركة (10%) تُخصم من محفظتك',
-                  value: _egp(order['commission']),
-                ),
-                const Divider(height: 20),
-                _MoneyRow(
-                  label: 'صافي ربحك',
-                  value: _egp(
-                    _toDouble(order['price']) - _toDouble(order['commission']),
-                  ),
-                  emphasize: true,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: busy
-                  ? null
-                  : () async {
-                      ref.read(orderActionProvider.notifier).state = true;
-                      try {
-                        await api.post('/orders/${order['id']}/accept');
-                        if (context.mounted) {
-                          _showMessage(context, 'Delivery accepted');
-                          ref.invalidate(availableOrdersProvider);
-                          context.push('/captain/trip/${order['id']}');
-                        }
-                      } catch (error) {
-                        if (context.mounted)
-                          _showMessage(context, ApiClient.errorMessage(error));
-                      } finally {
-                        ref.read(orderActionProvider.notifier).state = false;
-                      }
-                    },
-              icon: const Icon(Icons.check, size: 17),
-              label: Text(busy ? 'Accepting…' : 'Accept delivery'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-final orderActionProvider = StateProvider<bool>((ref) => false);
 final clientOrdersProvider = FutureProvider<List<dynamic>>(
   (ref) => ref.watch(apiClientProvider).getList('/orders'),
 );
-final availableOrdersProvider = FutureProvider<List<dynamic>>((ref) {
-  final point = ref.watch(captainLocationProvider);
-  return ref
-      .watch(apiClientProvider)
-      .getList(
-        '/orders/available',
-        query: {'latitude': point.latitude, 'longitude': point.longitude},
-      );
-});
-final captainLocationProvider = StateProvider<LatLng>((ref) => _cairo);
 final captainProfileProvider = FutureProvider<Map<String, dynamic>>(
   (ref) => ref.watch(apiClientProvider).getMap('/captains/me'),
 );
@@ -2994,43 +2807,7 @@ class _RouteLine extends StatelessWidget {
   );
 }
 
-class _MoneyRow extends StatelessWidget {
-  const _MoneyRow({
-    required this.label,
-    required this.value,
-    this.emphasize = false,
-  });
-  final String label;
-  final String value;
-  final bool emphasize;
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: Text(
-          label,
-          style: TextStyle(
-            color: _ink,
-            fontSize: 13,
-            fontWeight: emphasize ? FontWeight.w800 : FontWeight.w600,
-          ),
-        ),
-      ),
-      Text(
-        value,
-        style: TextStyle(
-          color: emphasize ? _green : _ink,
-          fontSize: emphasize ? 15 : 13,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    ],
-  );
-}
-
 double _toDouble(Object? value) => asDouble(value);
-
-String _egp(Object? value) => 'EGP ${_toDouble(value).toStringAsFixed(2)}';
 
 /// Client-facing amount in Arabic pounds (history + other client screens).
 /// Captain wallet/cards intentionally keep "EGP".

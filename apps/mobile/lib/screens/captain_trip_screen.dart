@@ -1,11 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../core/api_client.dart';
 import '../core/json_utils.dart';
+import '../core/location_service.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -165,6 +168,8 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
                         children: [
                           _statusCard(),
                           const SizedBox(height: 14),
+                          _mapCard(),
+                          const SizedBox(height: 14),
                           _routeCard(),
                           const SizedBox(height: 14),
                           if (_status == 'DELIVERED' || _status == 'COMPLETED')
@@ -274,6 +279,103 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
         _submitProof('delivery', 'تم تأكيد تسليم الشحنة');
         return;
     }
+  }
+
+  /// Pickup and delivery on a map, with the captain's own position when it is
+  /// known. Straight line only: the backend does not compute road routes.
+  Widget _mapCard() {
+    final pickup = _point(_order['pickupLatitude'], _order['pickupLongitude']);
+    if (pickup == null) return const SizedBox.shrink();
+    final delivery = _point(
+      _order['deliveryLatitude'],
+      _order['deliveryLongitude'],
+    );
+    final captain = ref.watch(captainLocationProvider);
+    final route = [pickup, ?delivery];
+    return _card(
+      title: 'خريطة الرحلة',
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          height: 210,
+          child: FlutterMap(
+            options: MapOptions(
+              initialCenter: pickup,
+              initialZoom: 13.5,
+              initialCameraFit: route.length > 1
+                  ? CameraFit.bounds(
+                      bounds: LatLngBounds.fromPoints(route),
+                      padding: const EdgeInsets.all(42),
+                    )
+                  : null,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.waslny.orders',
+              ),
+              if (route.length > 1)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: route,
+                      strokeWidth: 4,
+                      color: _green.withValues(alpha: 0.75),
+                    ),
+                  ],
+                ),
+              MarkerLayer(
+                markers: [
+                  if (captain != null)
+                    Marker(
+                      point: captain,
+                      width: 34,
+                      height: 34,
+                      child: const Icon(
+                        Icons.navigation,
+                        size: 22,
+                        color: Color(0xFF1D6FE0),
+                      ),
+                    ),
+                  Marker(
+                    point: pickup,
+                    width: 34,
+                    height: 34,
+                    child: const Icon(Icons.trip_origin, size: 26, color: _green),
+                  ),
+                  if (delivery != null)
+                    Marker(
+                      point: delivery,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(
+                        Icons.location_on,
+                        size: 36,
+                        color: Color(0xFFD9534F),
+                      ),
+                    ),
+                ],
+              ),
+              RichAttributionWidget(
+                attributions: [
+                  TextSourceAttribution('© OpenStreetMap contributors'),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  LatLng? _point(Object? latitude, Object? longitude) {
+    final lat = asDoubleOrNull(latitude);
+    final lon = asDoubleOrNull(longitude);
+    if (lat == null || lon == null) return null;
+    return LatLng(lat, lon);
   }
 
   Widget _routeCard() {
