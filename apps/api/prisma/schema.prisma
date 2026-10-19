@@ -375,7 +375,7 @@ model PricingSettings {
   pricePerKm          Decimal  @default(8) @db.Decimal(10, 2)
   commissionPercent   Decimal  @default(10) @db.Decimal(5, 2)
   minimumWalletBalance Decimal @default(0) @db.Decimal(12, 2)
-  minRadiusKm         Decimal  @default(2)  @db.Decimal(6, 2)
+  minRadiusKm         Decimal  @default(0.5)  @db.Decimal(6, 2)
   maxRadiusKm         Decimal  @default(15) @db.Decimal(6, 2)
   minTopUpAmount      Decimal  @default(50) @db.Decimal(10, 2)
   maxTopUpAmount      Decimal  @default(10000) @db.Decimal(12, 2)

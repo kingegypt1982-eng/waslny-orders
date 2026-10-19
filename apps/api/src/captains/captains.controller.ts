@@ -18,6 +18,7 @@ import { RedisService } from '../redis/redis.module';
 import { NationalIdCryptoService } from './national-id-crypto.service';
 import { validateEgyptianNationalId } from './national-id.util';
 import { CaptainProfileUpdateDto } from './captain-profile.dto';
+import { DEFAULT_MAX_RADIUS_KM, DEFAULT_MIN_RADIUS_KM } from '../orders/orders.constants';
 import { toPosixPath } from '../orders/proof-upload';
 
 class LocationDto {
@@ -65,7 +66,10 @@ export class CaptainsController {
     return {
       ...safe,
       missing,
-      radiusBand: { min: Number(settings.minRadiusKm ?? 2), max: Number(settings.maxRadiusKm ?? 15) },
+      radiusBand: {
+        min: Number(settings.minRadiusKm ?? DEFAULT_MIN_RADIUS_KM),
+        max: Number(settings.maxRadiusKm ?? DEFAULT_MAX_RADIUS_KM),
+      },
     };
   }
 

@@ -46,6 +46,8 @@ async function main() {
       commissionPercent: 10,
       minimumWalletBalance: 0,
       currency: 'EGP',
+      minRadiusKm: 0.5,
+      maxRadiusKm: 15,
     },
     create: {
       id: 'default',
@@ -54,6 +56,8 @@ async function main() {
       commissionPercent: 10,
       minimumWalletBalance: 0,
       currency: 'EGP',
+      minRadiusKm: 0.5,
+      maxRadiusKm: 15,
     },
   });
 
