@@ -39,7 +39,10 @@ describe('CaptainsController profile', () => {
     else process.env.NATIONAL_ID_ENCRYPTION_KEY = originalKey;
   });
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.pricingSettings.upsert.mockResolvedValue({ minRadiusKm: 2, maxRadiusKm: 15 });
+  });
 
   it('rejects an invalid national ID', async () => {
     await expect(
@@ -125,6 +128,7 @@ describe('CaptainsController profile', () => {
       ]),
     );
     expect(result.missing).not.toContain('nationalId');
+    expect(result.radiusBand).toEqual({ min: 2, max: 15 });
   });
 
   it('accepts vehicle make/model/color and plate through the profile update', async () => {

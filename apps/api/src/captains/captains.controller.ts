@@ -58,10 +58,15 @@ export class CaptainsController {
     if (!profile.vehicleType || !profile.vehiclePlate) missing.push('vehicle');
     if (!profile.vehicleMake || !profile.vehicleColor) missing.push('vehicleDetails');
     if (!profile.profilePhotoDocument || profile.profilePhotoDocument === 'PENDING_UPLOAD') missing.push('profilePhoto');
+    const settings = await this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
     const safe = { ...profile } as Record<string, unknown>;
     delete safe.nationalIdEncrypted;
     delete safe.nationalIdHash;
-    return { ...safe, missing };
+    return {
+      ...safe,
+      missing,
+      radiusBand: { min: Number(settings.minRadiusKm ?? 2), max: Number(settings.maxRadiusKm ?? 15) },
+    };
   }
 
   @Post('documents/:type')
