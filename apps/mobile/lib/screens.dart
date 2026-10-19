@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
 import 'core/google_auth.dart';
 import 'core/json_utils.dart';
+import 'core/url_opener.dart';
 import 'screens/captain_availability_screen.dart';
 import 'screens/forgot_password.dart';
 import 'screens/history_screen.dart';
@@ -2541,18 +2542,57 @@ class _OrderCard extends StatelessWidget {
   );
 }
 
-class WalletScreen extends ConsumerWidget {
+class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
-  Future<void> _topUp(BuildContext context, WidgetRef ref) async {
-    final amount = TextEditingController();
+  @override
+  ConsumerState<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends ConsumerState<WalletScreen> {
+  /// Payment confirmation arrives from the Kashier webhook, not the app, so the
+  /// screen polls until the top-up leaves PENDING.
+  static const _pollInterval = Duration(seconds: 4);
+  static const _maxPolls = 45; // ~3 minutes before giving up.
+
+  late Future<Map<String, dynamic>> _wallet;
+  Timer? _poll;
+  int _polls = 0;
+  String? _pendingTopUpId;
+  String? _pendingCredit;
+
+  @override
+  void initState() {
+    super.initState();
+    _wallet = _loadWallet();
+  }
+
+  Future<Map<String, dynamic>> _loadWallet() =>
+      ref.read(apiClientProvider).getMap('/captains/wallet');
+
+  void _reload() => setState(() {
+    _wallet = _loadWallet();
+  });
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _addFunds() async {
+    var text = '';
     final value = await showDialog<double>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Add wallet funds'),
         content: TextField(
-          controller: amount,
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(labelText: 'Amount in EGP'),
+          onChanged: (value) => text = value,
+          onSubmitted: (value) => Navigator.pop(
+            context,
+            double.tryParse(value.trim()),
+          ),
         ),
         actions: [
           TextButton(
@@ -2561,33 +2601,123 @@ class WalletScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () =>
-                Navigator.pop(context, double.tryParse(amount.text)),
+                Navigator.pop(context, double.tryParse(text.trim())),
             child: const Text('Continue'),
           ),
         ],
       ),
     );
-    amount.dispose();
     if (value == null) return;
+    if (!mounted) return;
+    if (value < 1) {
+      _showMessage(context, 'Enter an amount of at least 1 EGP.');
+      return;
+    }
+    await _createTopUp(value);
+  }
+
+  Future<void> _createTopUp(double amount) async {
+    final api = ref.read(apiClientProvider);
+    final Map<String, dynamic> quote;
     try {
-      final result = await ref
-          .read(apiClientProvider)
-          .post('/captains/wallet/top-up', data: {'amount': value});
-      if (context.mounted)
-        _showMessage(
-          context,
-          result['message'] as String? ?? 'Payment intent created',
-        );
+      quote = await api.post('/wallet/topups', data: {'amount': amount});
     } catch (error) {
-      if (context.mounted) _showMessage(context, ApiClient.errorMessage(error));
+      if (mounted) _showMessage(context, ApiClient.errorMessage(error));
+      return;
+    }
+    if (!mounted) return;
+    final credit = asDouble(quote['creditAmount']);
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (context) => _CheckoutSheet(
+        credit: credit,
+        fee: asDouble(quote['feeAmount']),
+        charge: asDouble(quote['chargeAmount']),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final uri = Uri.tryParse('${quote['checkoutUrl'] ?? ''}');
+    if (uri == null || !uri.hasScheme) {
+      _showMessage(context, 'Could not open the payment page.');
+      return;
+    }
+    var opened = false;
+    try {
+      opened = await ref.read(urlOpenerProvider)(uri);
+    } catch (_) {
+      opened = false;
+    }
+    if (!mounted) return;
+    if (!opened) {
+      _showMessage(context, 'Open the payment page in your browser to finish.');
+    }
+    final id = await _latestTopUpId();
+    if (!mounted || id == null) return;
+    _watch(id, credit);
+  }
+
+  Future<String?> _latestTopUpId() async {
+    try {
+      final list = await ref
+          .read(apiClientProvider)
+          .getList('/wallet/topups', query: {'take': 1});
+      if (list.isEmpty) return null;
+      return (list.first as Map)['id'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _watch(String id, double credit) {
+    _poll?.cancel();
+    _polls = 0;
+    setState(() {
+      _pendingTopUpId = id;
+      _pendingCredit = credit.toStringAsFixed(2);
+    });
+    _check(id);
+    _poll = Timer.periodic(_pollInterval, (_) {
+      _polls += 1;
+      if (_polls > _maxPolls) {
+        _poll?.cancel();
+        return;
+      }
+      _check(id);
+    });
+  }
+
+  Future<void> _check(String id) async {
+    final Map<String, dynamic> topUp;
+    try {
+      topUp = await ref.read(apiClientProvider).getMap('/wallet/topups/$id');
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    final status = '${topUp['status'] ?? ''}';
+    if (status == 'SUCCEEDED') {
+      _poll?.cancel();
+      setState(() => _pendingTopUpId = null);
+      _reload();
+      _showMessage(context, 'Wallet topped up successfully.');
+    } else if (status == 'FAILED' || status == 'EXPIRED') {
+      _poll?.cancel();
+      setState(() => _pendingTopUpId = null);
+      final reason = topUp['failureReason'] as String?;
+      _showMessage(
+        context,
+        reason == null || reason.isEmpty
+            ? 'Top-up ${status.toLowerCase()}.'
+            : reason,
+      );
     }
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => Scaffold(
+  Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Captain wallet')),
     body: FutureBuilder<Map<String, dynamic>>(
-      future: ref.watch(apiClientProvider).getMap('/captains/wallet'),
+      future: _wallet,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting)
           return const Center(child: CircularProgressIndicator());
@@ -2601,6 +2731,13 @@ class WalletScreen extends ConsumerWidget {
         return ListView(
           padding: const EdgeInsets.all(18),
           children: [
+            if (_pendingTopUpId != null) ...[
+              _PendingTopUpBanner(
+                credit: _pendingCredit,
+                onCheck: () => _check(_pendingTopUpId!),
+              ),
+              const SizedBox(height: 18),
+            ],
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -2630,7 +2767,7 @@ class WalletScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 13),
                   OutlinedButton.icon(
-                    onPressed: () => _topUp(context, ref),
+                    onPressed: _addFunds,
                     icon: const Icon(Icons.add, size: 17),
                     label: const Text('Add funds'),
                     style: OutlinedButton.styleFrom(
@@ -2655,6 +2792,149 @@ class WalletScreen extends ConsumerWidget {
           ],
         );
       },
+    ),
+  );
+}
+
+/// Top-up fee breakdown shown before the hosted payment page is opened.
+class _CheckoutSheet extends StatelessWidget {
+  const _CheckoutSheet({
+    required this.credit,
+    required this.fee,
+    required this.charge,
+  });
+  final double credit, fee, charge;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Top-up summary',
+            style: TextStyle(
+              color: _ink,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _MoneyLine(label: 'Wallet credit', value: credit),
+          _MoneyLine(label: 'Service fee', value: fee),
+          const Divider(height: 22),
+          _MoneyLine(label: 'Total to pay', value: charge, bold: true),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Later'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Pay now'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _MoneyLine extends StatelessWidget {
+  const _MoneyLine({
+    required this.label,
+    required this.value,
+    this.bold = false,
+  });
+  final String label;
+  final double value;
+  final bool bold;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: bold ? _ink : _muted,
+              fontSize: bold ? 14 : 13,
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+        Text(
+          'EGP ${value.toStringAsFixed(2)}',
+          style: TextStyle(
+            color: _ink,
+            fontSize: bold ? 16 : 13,
+            fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Shown while the app waits for the Kashier webhook to settle the payment.
+class _PendingTopUpBanner extends StatelessWidget {
+  const _PendingTopUpBanner({required this.credit, required this.onCheck});
+  final String? credit;
+  final VoidCallback onCheck;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF7E6),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFFF0D9A8)),
+    ),
+    child: Row(
+      children: [
+        const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            credit == null
+                ? 'Waiting for payment confirmation…'
+                : 'Waiting for the EGP $credit top-up to be confirmed…',
+            style: const TextStyle(color: _ink, fontSize: 12),
+          ),
+        ),
+        TextButton(
+          onPressed: onCheck,
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: const Text(
+            'Check now',
+            style: TextStyle(
+              color: _green,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     ),
   );
 }
