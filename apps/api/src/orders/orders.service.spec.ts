@@ -13,6 +13,7 @@ describe('OrdersService wallet rules', () => {
     order: { findUnique: jest.fn(), updateMany: jest.fn(), update: jest.fn(), create: jest.fn() },
     orderEvent: { create: jest.fn().mockResolvedValue({ id: 'e1' }) },
     orderProof: { findFirst: jest.fn(), create: jest.fn() },
+    orderSkip: { deleteMany: jest.fn(), upsert: jest.fn() },
     purchaseInvoice: { findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
     captainProfile: { findUnique: jest.fn(), update: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
@@ -22,12 +23,13 @@ describe('OrdersService wallet rules', () => {
   };
   const prisma = {
     $transaction: jest.fn(async (callback: any) => callback(tx)),
-    order: { findUnique: jest.fn(), updateMany: jest.fn(), update: jest.fn() },
+    order: { findUnique: jest.fn(), updateMany: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     orderEvent: { findMany: jest.fn() },
     orderProof: { findFirst: jest.fn(), create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
+    orderSkip: { upsert: jest.fn() },
     purchaseInvoice: { findUnique: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
-    captainProfile: { update: jest.fn() },
+    captainProfile: { findUnique: jest.fn(), update: jest.fn() },
     user: { findUnique: jest.fn() },
   };
   const redis = { nearbyCaptains: jest.fn(), updateCaptainLocation: jest.fn() };
@@ -47,7 +49,7 @@ describe('OrdersService wallet rules', () => {
     jest.clearAllMocks();
     prisma.$transaction.mockImplementation(async (callback: any) => callback(tx));
     tx.pricingSettings.upsert.mockResolvedValue({ minimumWalletBalance: 0 });
-    prisma.pricingSettings.upsert.mockResolvedValue({ basePrice: 30, pricePerKm: 8, commissionPercent: 10, minimumWalletBalance: 0, disabledCategories: [] });
+    prisma.pricingSettings.upsert.mockResolvedValue({ basePrice: 30, pricePerKm: 8, commissionPercent: 10, minimumWalletBalance: 0, disabledCategories: [], minRadiusKm: 2, maxRadiusKm: 15 });
     prisma.user.findUnique.mockResolvedValue({ phone: '+201000000000' });
     tx.user.findUnique.mockResolvedValue({ phone: '+201000000000' });
     policies.hasAcknowledgement.mockResolvedValue({ id: 'ack1' });
@@ -76,6 +78,7 @@ describe('OrdersService wallet rules', () => {
     expect(tx.walletTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ userId: 'cap1', type: 'ORDER_COMMISSION' }),
     });
+    expect(tx.orderSkip.deleteMany).toHaveBeenCalledWith({ where: { orderId: 'o1' } });
     expect(notifications.create).toHaveBeenCalledWith(
       'client1',
       expect.any(String),
@@ -115,6 +118,135 @@ describe('OrdersService wallet rules', () => {
       response: expect.objectContaining({ code: 'ACK_REQUIRED', type: PolicyAcknowledgementType.SENSITIVE_CATEGORY }),
     });
     expect(tx.wallet.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('reports a conflict when the order was taken between feed and accept', async () => {
+    tx.order.findUnique.mockResolvedValue({ id: 'o1', status: 'SEARCHING_CAPTAIN', captainId: null, commission: 15, category: 'PACKAGE' });
+    tx.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+    tx.order.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.accept('o1', 'cap1')).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.walletTransaction.create).not.toHaveBeenCalled();
+  });
+
+  describe('available orders feed', () => {
+    it('returns only orders inside the captain radius with the distance attached', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE', isOnline: true, serviceRadiusKm: 5 });
+      prisma.captainProfile.update.mockResolvedValue({});
+      prisma.order.findMany.mockResolvedValue([
+        { id: 'near', pickupLatitude: 30.05, pickupLongitude: 31.24 },
+        { id: 'far', pickupLatitude: 30.3, pickupLongitude: 31.5 },
+      ]);
+
+      const result = await service.available('cap1', 30.0444, 31.2357);
+
+      expect(prisma.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          captainId: null,
+          skips: { none: { captainId: 'cap1' } },
+          status: { in: ['PENDING', 'SEARCHING_CAPTAIN'] },
+        }),
+      }));
+      expect(result.map((order: any) => order.id)).toEqual(['near']);
+      expect(result[0].distanceToPickupKm).toBeLessThan(5);
+      expect(prisma.captainProfile.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { userId: 'cap1' },
+        data: expect.objectContaining({ lastLat: 30.0444, lastLng: 31.2357 }),
+      }));
+    });
+
+    it('returns an empty feed while the captain is offline', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE', isOnline: false, serviceRadiusKm: 10 });
+
+      await expect(service.available('cap1', 30, 31)).resolves.toEqual([]);
+      expect(prisma.order.findMany).not.toHaveBeenCalled();
+    });
+
+    it('blocks captains whose account is not approved', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ status: 'PENDING', isOnline: true, serviceRadiusKm: 10 });
+
+      await expect(service.available('cap1', 30, 31)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.order.findMany).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the configured maximum radius when the captain has none', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE', isOnline: true, serviceRadiusKm: 0 });
+      prisma.captainProfile.update.mockResolvedValue({});
+      prisma.order.findMany.mockResolvedValue([{ id: 'mid', pickupLatitude: 30.09, pickupLongitude: 31.29 }]);
+
+      const result = await service.available('cap1', 30.0444, 31.2357);
+
+      expect(result.map((order: any) => order.id)).toEqual(['mid']);
+    });
+  });
+
+  describe('skipping orders', () => {
+    it('records a skip idempotently for an available order', async () => {
+      prisma.order.findUnique.mockResolvedValue({ id: 'o1', captainId: null, status: 'SEARCHING_CAPTAIN' });
+      prisma.orderSkip.upsert.mockResolvedValue({ id: 's1' });
+
+      await expect(service.skip('o1', 'cap1')).resolves.toEqual({ skipped: true });
+      expect(prisma.orderSkip.upsert).toHaveBeenCalledWith({
+        where: { orderId_captainId: { orderId: 'o1', captainId: 'cap1' } },
+        update: {},
+        create: { orderId: 'o1', captainId: 'cap1' },
+      });
+    });
+
+    it('cannot skip an order that was already taken', async () => {
+      prisma.order.findUnique.mockResolvedValue({ id: 'o1', captainId: 'cap2', status: 'ACCEPTED' });
+
+      await expect(service.skip('o1', 'cap1')).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.orderSkip.upsert).not.toHaveBeenCalled();
+    });
+
+    it('cannot skip an unknown order', async () => {
+      prisma.order.findUnique.mockResolvedValue(null);
+
+      await expect(service.skip('missing', 'cap1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.orderSkip.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('server-side expiry of stale searches', () => {
+    it('cancels an expired search with a SYSTEM event and a client notification', async () => {
+      prisma.order.findMany.mockResolvedValue([
+        { id: 'o1', reference: 'WS-9', clientId: 'client1', status: 'SEARCHING_CAPTAIN' },
+      ]);
+      tx.order.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.expireStaleSearches();
+
+      expect(result).toEqual({ checked: 1, expired: 1 });
+      expect(tx.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ id: 'o1', captainId: null }),
+        data: { status: 'CANCELLED' },
+      }));
+      expect(tx.orderEvent.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ actorRole: 'SYSTEM' }),
+      }));
+      expect(notifications.create).toHaveBeenCalledWith(
+        'client1',
+        expect.any(String),
+        expect.any(String),
+        'ORDER',
+        { orderId: 'o1' },
+      );
+    });
+
+    it('ignores orders another cycle already cancelled', async () => {
+      prisma.order.findMany.mockResolvedValue([
+        { id: 'o1', reference: 'WS-9', clientId: 'client1', status: 'SEARCHING_CAPTAIN' },
+      ]);
+      tx.order.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await service.expireStaleSearches();
+
+      expect(result.expired).toBe(0);
+      expect(tx.orderEvent.create).not.toHaveBeenCalled();
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
   });
 
   it('requires a client category acknowledgement before creating a sensitive order', async () => {

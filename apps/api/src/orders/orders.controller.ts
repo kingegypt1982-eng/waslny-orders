@@ -9,6 +9,7 @@ import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { AvailableOrdersQueryDto } from './dto/available-orders-query.dto';
 import { ProofNoteDto } from './dto/proof-note.dto';
 import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
 import { RespondInvoiceDto } from './dto/respond-invoice.dto';
@@ -27,10 +28,11 @@ export class OrdersController {
   @Post('quote') @Roles('CLIENT') quote(@Body() body: QuoteOrderDto) { return this.orders.quote(body); }
   @Post() @Roles('CLIENT') create(@CurrentUser() user: { id: string }, @Body() body: CreateOrderDto) { return this.orders.create(user.id, body); }
   @Get() list(@CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) { return this.orders.listForUser(user); }
-  @Get('available') @Roles('CAPTAIN') available(@Query('latitude') latitude: string, @Query('longitude') longitude: string) {
-    return this.orders.available(Number(latitude), Number(longitude));
+  @Get('available') @Roles('CAPTAIN') available(@CurrentUser() user: { id: string }, @Query() query: AvailableOrdersQueryDto) {
+    return this.orders.available(user.id, query.latitude, query.longitude);
   }
   @Post(':id/accept') @Roles('CAPTAIN') accept(@Param('id') id: string, @CurrentUser() user: { id: string }) { return this.orders.accept(id, user.id); }
+  @Post(':id/skip') @Roles('CAPTAIN') skip(@Param('id') id: string, @CurrentUser() user: { id: string }) { return this.orders.skip(id, user.id); }
   @Post(':id/release') @Roles('CAPTAIN') release(@Param('id') id: string, @CurrentUser() user: { id: string }) { return this.orders.release(id, user.id); }
   @Patch(':id/status') @Roles('CAPTAIN') transition(@Param('id') id: string, @CurrentUser() user: { id: string }, @Body() body: UpdateStatusDto) {
     return this.orders.transition(id, user.id, body.status as OrderStatus);

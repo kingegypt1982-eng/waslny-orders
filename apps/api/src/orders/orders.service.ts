@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { EventActor, NotificationType, OrderStatus, PolicyAcknowledgementType, Prisma, ProofType, PurchaseInvoiceStatus, ShipmentCategory, UserRole, WalletTransactionType } from '@prisma/client';
+import { CaptainStatus, EventActor, NotificationType, OrderStatus, PolicyAcknowledgementType, Prisma, ProofType, PurchaseInvoiceStatus, ShipmentCategory, UserRole, WalletTransactionType } from '@prisma/client';
 import { existsSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
@@ -11,6 +11,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
 import { RespondInvoiceDto } from './dto/respond-invoice.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
+import { DEFAULT_MAX_RADIUS_KM, DEFAULT_MIN_RADIUS_KM, ORDER_SEARCH_EXPIRY_MINUTES } from './orders.constants';
 import { ProofPhotoInput, resolveUploadPath, saveProofPhoto, toPosixPath } from './proof-upload';
 
 const radians = (degrees: number) => degrees * Math.PI / 180;
@@ -21,6 +22,8 @@ export function distanceKm(fromLat: number, fromLon: number, toLat: number, toLo
   const arc = Math.sin(deltaLat / 2) ** 2 + Math.cos(radians(fromLat)) * Math.cos(radians(toLat)) * Math.sin(deltaLon / 2) ** 2;
   return 6371 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
 }
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
 
 @Injectable()
 export class OrdersService {
@@ -138,16 +141,123 @@ export class OrdersService {
     return order;
   }
 
-  async available(latitude: number, longitude: number) {
-    const nearby = await this.redis.nearbyCaptains(latitude, longitude);
-    const ids = nearby.map((entry) => Array.isArray(entry) ? entry[0] : entry).filter((id): id is string => typeof id === 'string');
-    const orders = await this.prisma.order.findMany({
-      where: { status: { in: [OrderStatus.PENDING, OrderStatus.SEARCHING_CAPTAIN] }, captainId: null },
-      orderBy: { createdAt: 'asc' }, take: 50,
+  /**
+   * inDrive-style feed: the captain's own coordinates decide what is shown.
+   * The server keeps the location heartbeat (lastLat/lastLng/lastSeenAt), so
+   * the radius filter never trusts a client-supplied radius. Orders already
+   * skipped by this captain and stale searches are excluded.
+   */
+  async available(userId: string, latitude: number, longitude: number) {
+    const captain = await this.prisma.captainProfile.findUnique({ where: { userId } });
+    if (!captain || captain.status !== CaptainStatus.ACTIVE) {
+      throw new ForbiddenException('Captain account is not approved');
+    }
+    await this.prisma.captainProfile.update({
+      where: { userId },
+      data: { lastLat: latitude, lastLng: longitude, lastSeenAt: new Date() },
     });
-    if (!ids.length) return orders;
-    return orders.filter((order) => ids.length > 0 && distanceKm(latitude, longitude, order.pickupLatitude, order.pickupLongitude) <= 10);
+    try {
+      await this.redis.updateCaptainLocation(userId, latitude, longitude);
+    } catch {
+      // The Redis geo index is a best-effort cache; PostgreSQL stays authoritative.
+    }
+    if (!captain.isOnline) return [];
+
+    const settings = await this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
+    const minRadius = Number(settings.minRadiusKm ?? DEFAULT_MIN_RADIUS_KM);
+    const maxRadius = Number(settings.maxRadiusKm ?? DEFAULT_MAX_RADIUS_KM);
+    const ownRadius = Number(captain.serviceRadiusKm) || maxRadius;
+    const radiusKm = Math.max(minRadius, Math.min(ownRadius, maxRadius));
+
+    const notExpiredSince = new Date(Date.now() - ORDER_SEARCH_EXPIRY_MINUTES * 60_000);
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: { in: [OrderStatus.PENDING, OrderStatus.SEARCHING_CAPTAIN] },
+        captainId: null,
+        createdAt: { gte: notExpiredSince },
+        skips: { none: { captainId: userId } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 50,
+    });
+    return orders
+      .map((order) => ({
+        ...order,
+        distanceToPickupKm: round2(distanceKm(latitude, longitude, order.pickupLatitude, order.pickupLongitude)),
+      }))
+      .filter((order) => order.distanceToPickupKm <= radiusKm);
   }
+
+  /**
+   * Skip hides an order from this captain's feed permanently. Idempotent:
+   * skipping twice is a no-op. Orders that are already taken or gone 409.
+   */
+  async skip(orderId: string, captainId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, captainId: true, status: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (
+      order.captainId ||
+      (order.status !== OrderStatus.PENDING && order.status !== OrderStatus.SEARCHING_CAPTAIN)
+    ) {
+      throw new ConflictException('Order is no longer available');
+    }
+    await this.prisma.orderSkip.upsert({
+      where: { orderId_captainId: { orderId, captainId } },
+      update: {},
+      create: { orderId, captainId },
+    });
+    return { skipped: true };
+  }
+
+  /**
+   * Server-side expiry: unassigned searches older than the window are
+   * cancelled with a SYSTEM audit event and a client notification. The
+   * status-guarded updateMany makes concurrent cycles harmless.
+   */
+  async expireStaleSearches(limit = 50) {
+    const cutoff = new Date(Date.now() - ORDER_SEARCH_EXPIRY_MINUTES * 60_000);
+    const stale = await this.prisma.order.findMany({
+      where: {
+        status: { in: [OrderStatus.PENDING, OrderStatus.SEARCHING_CAPTAIN] },
+        captainId: null,
+        createdAt: { lt: cutoff },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      select: { id: true, reference: true, clientId: true, status: true },
+    });
+    let expired = 0;
+    for (const order of stale) {
+      const cancelled = await this.prisma.$transaction(async (tx) => {
+        const moved = await tx.order.updateMany({
+          where: {
+            id: order.id,
+            captainId: null,
+            status: { in: [OrderStatus.PENDING, OrderStatus.SEARCHING_CAPTAIN] },
+          },
+          data: { status: OrderStatus.CANCELLED },
+        });
+        if (!moved.count) return false;
+        await this.orderEvents.record(tx, {
+          orderId: order.id,
+          fromStatus: order.status,
+          toStatus: OrderStatus.CANCELLED,
+          actorId: null,
+          actorRole: EventActor.SYSTEM,
+          note: 'Expired: no captain accepted within the search window',
+        });
+        return true;
+      });
+      if (!cancelled) continue;
+      expired += 1;
+      await this.notifyClient(order, 'لم نجد مندوبًا للطلب', `انتهت مدة البحث عن مندوب للطلب ${order.reference} وتم إلغاؤه. يمكنك إنشاء طلب جديد.`);
+    }
+    return { checked: stale.length, expired };
+  }
+
 
   async accept(orderId: string, captainId: string) {
     const order = await this.prisma.$transaction(async (tx) => {
@@ -161,7 +271,7 @@ export class OrdersService {
       }
       if (captain.status !== 'ACTIVE') throw new ForbiddenException('Captain account is not approved');
       if ((order.status !== OrderStatus.PENDING && order.status !== OrderStatus.SEARCHING_CAPTAIN) || order.captainId) {
-        throw new UnprocessableEntityException('Order is no longer available');
+        throw new ConflictException('Order is no longer available');
       }
       if (!(await this.policies.hasAcknowledgement(captainId, PolicyAcknowledgementType.TERMS_CAPTAIN, { orderId: null, category: null }))) {
         throw ackRequired(PolicyAcknowledgementType.TERMS_CAPTAIN);
@@ -183,7 +293,8 @@ export class OrdersService {
         where: { id: orderId, captainId: null, status: { in: [OrderStatus.PENDING, OrderStatus.SEARCHING_CAPTAIN] } },
         data: { captainId, status: OrderStatus.ACCEPTED, acceptedAt: new Date() },
       });
-      if (!assigned.count) throw new UnprocessableEntityException('Order was accepted by another captain');
+      if (!assigned.count) throw new ConflictException('Order was accepted by another captain');
+      await tx.orderSkip.deleteMany({ where: { orderId } });
       await tx.walletTransaction.create({
         data: { userId: captainId, orderId, type: WalletTransactionType.ORDER_COMMISSION, amount: new Prisma.Decimal(order.commission).negated(), note: 'Order commission reserved at acceptance' },
       });

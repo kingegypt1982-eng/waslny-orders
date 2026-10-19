@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { CaptainsController } from './captains.controller';
 import { NationalIdCryptoService } from './national-id-crypto.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,6 +17,7 @@ jest.mock('fs/promises', () => ({
 describe('CaptainsController profile', () => {
   const prisma = {
     captainProfile: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    pricingSettings: { upsert: jest.fn() },
   };
   const redis = { updateCaptainLocation: jest.fn() };
   const originalKey = process.env.NATIONAL_ID_ENCRYPTION_KEY;
@@ -231,5 +232,44 @@ describe('CaptainsController profile', () => {
     await expect(
       controller.myDocument({ id: 'u1' }, 'profile-photo'),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('only an approved captain can go online', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({ status: 'PENDING' });
+
+    await expect(
+      controller.availability({ id: 'u1' }, { isOnline: true }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.captainProfile.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a service radius outside the admin-configured band', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    prisma.pricingSettings.upsert.mockResolvedValue({ minRadiusKm: 2, maxRadiusKm: 15 });
+
+    await expect(
+      controller.availability({ id: 'u1' }, { isOnline: true, serviceRadiusKm: 40 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.captainProfile.update).not.toHaveBeenCalled();
+  });
+
+  it('toggles availability and persists the location heartbeat', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    prisma.pricingSettings.upsert.mockResolvedValue({ minRadiusKm: 2, maxRadiusKm: 15 });
+    prisma.captainProfile.update.mockResolvedValue({ isOnline: true, serviceRadiusKm: 8 });
+
+    await controller.availability({ id: 'u1' }, { isOnline: true, serviceRadiusKm: 8 });
+    expect(prisma.captainProfile.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'u1' },
+      data: { isOnline: true, serviceRadiusKm: 8 },
+    }));
+
+    redis.updateCaptainLocation.mockResolvedValue(true);
+    prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    await controller.location({ id: 'u1' }, { latitude: 30.1, longitude: 31.2 });
+    expect(prisma.captainProfile.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'u1' },
+      data: expect.objectContaining({ lastLat: 30.1, lastLng: 31.2, lastSeenAt: expect.any(Date) }),
+    }));
   });
 });

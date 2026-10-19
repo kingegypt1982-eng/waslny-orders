@@ -1,9 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post, StreamableFile, UseGuards } from '@nestjs/common';
-import { BadRequestException, ConflictException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { IsNumber, Max, Min } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { randomUUID } from 'crypto';
 import { existsSync, createReadStream } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
@@ -23,6 +23,11 @@ import { toPosixPath } from '../orders/proof-upload';
 class LocationDto {
   @IsNumber() @Min(-90) @Max(90) latitude: number;
   @IsNumber() @Min(-180) @Max(180) longitude: number;
+}
+
+class AvailabilityDto {
+  @IsBoolean() isOnline: boolean;
+  @IsOptional() @IsNumber() @Min(1) @Max(100) serviceRadiusKm?: number;
 }
 
 @ApiTags('Captains')
@@ -206,7 +211,49 @@ export class CaptainsController {
   @Post('location') async location(@CurrentUser() user: { id: string }, @Body() body: LocationDto) {
     const profile = await this.prisma.captainProfile.findUnique({ where: { userId: user.id }, select: { status: true } });
     if (!profile || profile.status !== 'ACTIVE') return { updated: false, reason: 'Captain is not approved' };
+    // Keep the heartbeat in PostgreSQL as well: the orders feed filters by it.
+    await this.prisma.captainProfile.update({
+      where: { userId: user.id },
+      data: { lastLat: body.latitude, lastLng: body.longitude, lastSeenAt: new Date() },
+    });
     return { updated: await this.redis.updateCaptainLocation(user.id, body.latitude, body.longitude) };
+  }
+
+  /**
+   * Online/offline switch for the orders feed plus the captain's own service
+   * radius. The radius must stay inside the admin-configured band
+   * (PricingSettings.minRadiusKm..maxRadiusKm).
+   */
+  @Patch('me/availability')
+  async availability(@CurrentUser() user: { id: string }, @Body() body: AvailabilityDto) {
+    const profile = await this.prisma.captainProfile.findUnique({
+      where: { userId: user.id },
+      select: { status: true },
+    });
+    if (!profile) throw new NotFoundException('Captain profile not found');
+    if (body.isOnline && profile.status !== 'ACTIVE') {
+      throw new ForbiddenException('Captain account is not approved');
+    }
+    const settings = await this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
+    const min = Number(settings.minRadiusKm);
+    const max = Number(settings.maxRadiusKm);
+    const data: { isOnline: boolean; serviceRadiusKm?: number } = { isOnline: body.isOnline };
+    if (body.serviceRadiusKm !== undefined) {
+      if (body.serviceRadiusKm < min || body.serviceRadiusKm > max) {
+        throw new BadRequestException({
+          code: 'RADIUS_OUT_OF_RANGE',
+          message: `Service radius must be between ${min} and ${max} km`,
+          min,
+          max,
+        });
+      }
+      data.serviceRadiusKm = body.serviceRadiusKm;
+    }
+    return this.prisma.captainProfile.update({
+      where: { userId: user.id },
+      data,
+      select: { isOnline: true, serviceRadiusKm: true },
+    });
   }
 
   @Get('wallet') wallet(@CurrentUser() user: { id: string }) {
