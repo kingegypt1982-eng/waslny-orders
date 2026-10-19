@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { Link, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, ArrowRight, ArrowUpRight, Bell, Bike, Boxes, Check, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import './dashboard.css'
+import { applicationReviewLabel, isDocUploaded } from './labels'
 
 type Order = { id: string; reference: string; status: string; pickupLabel: string; deliveryLabel: string; price: number; createdAt: string; client?: { name: string }; captain?: { id?: string; name: string } | null }
 type Captain = {
@@ -21,51 +21,66 @@ type WalletRecord = { id: string; name: string; email: string; wallet: { balance
 type DashboardData = { clients: number; captains: number; pendingCaptains: number; openOrders: number; completedOrders: number; revenue: number; commission: number; recentOrders: Order[] }
 type Pricing = { basePrice: number; pricePerKm: number; commissionPercent: number; minimumWalletBalance: number }
 
-const ordersDemo: Order[] = [
-  { id: 'o1', reference: 'WS-20481', status: 'ON_THE_WAY', pickupLabel: 'Dokki, Giza', deliveryLabel: 'Zamalek, Cairo', price: 94, createdAt: '2026-10-09T10:12:00', client: { name: 'Nour Studio' }, captain: { name: 'Omar Hassan' } },
-  { id: 'o2', reference: 'WS-20480', status: 'SEARCHING_CAPTAIN', pickupLabel: 'Nasr City, Cairo', deliveryLabel: 'New Cairo', price: 168, createdAt: '2026-10-09T09:48:00', client: { name: 'Delta Auto' } },
-  { id: 'o3', reference: 'WS-20479', status: 'DELIVERED', pickupLabel: 'Mohandessin, Giza', deliveryLabel: 'Maadi, Cairo', price: 132, createdAt: '2026-10-09T09:18:00', client: { name: 'Mina Pharmacy' }, captain: { name: 'Salma Adel' } },
-  { id: 'o4', reference: 'WS-20478', status: 'ACCEPTED', pickupLabel: 'Heliopolis, Cairo', deliveryLabel: 'Sheraton, Cairo', price: 76, createdAt: '2026-10-09T08:56:00', client: { name: 'Studio 9' }, captain: { name: 'Karim Fathy' } },
-  { id: 'o5', reference: 'WS-20477', status: 'COMPLETED', pickupLabel: 'Agouza, Giza', deliveryLabel: 'Garden City, Cairo', price: 110, createdAt: '2026-10-09T08:20:00', client: { name: 'Paper House' }, captain: { name: 'Youssef Ali' } },
+const navigation: { label: string; to: string; icon: typeof Users; stat?: 'openOrders' | 'pendingCaptains' }[] = [
+  { label: 'Overview', to: '/', icon: LayoutDashboard },
+  { label: 'Orders', to: '/orders', icon: ClipboardList, stat: 'openOrders' },
+  { label: 'Captains', to: '/captains', icon: Bike, stat: 'pendingCaptains' },
+  { label: 'Clients', to: '/clients', icon: Users },
+  { label: 'Wallets', to: '/wallets', icon: WalletCards },
+  { label: 'Reports', to: '/reports', icon: Activity },
 ]
-const captainsDemo: Captain[] = [
-  { id: 'c1', status: 'PENDING', vehicleType: 'Motorcycle', vehiclePlate: 'س ن د ٤٢١', createdAt: '2026-10-09', nationalIdDocument: '#', licenseDocument: '#', vehicleDocument: '#', user: { id: 'u1', name: 'Mahmoud Nabil', email: 'mahmoud@example.com', wallet: { balance: 0 } } },
-  { id: 'c2', status: 'ACTIVE', vehicleType: 'Car', vehiclePlate: 'ق ر ب ٩٠٢', createdAt: '2026-10-08', nationalIdDocument: '#', licenseDocument: '#', vehicleDocument: '#', user: { id: 'u2', name: 'Salma Adel', email: 'salma@example.com', wallet: { balance: 340 } } },
-  { id: 'c3', status: 'ACTIVE', vehicleType: 'Motorcycle', vehiclePlate: 'م ن ب ١٧٧', createdAt: '2026-10-07', nationalIdDocument: '#', licenseDocument: '#', vehicleDocument: '#', user: { id: 'u3', name: 'Omar Hassan', email: 'omar@example.com', wallet: { balance: 215 } } },
-]
-const clientsDemo: Client[] = [
-  { id: 'u4', name: 'Delta Auto', email: 'ops@deltaauto.example', phone: '+201002223333', _count: { clientOrders: 18 } },
-  { id: 'u5', name: 'Nour Studio', email: 'hello@nour.example', _count: { clientOrders: 12 } },
-  { id: 'u6', name: 'Mina Pharmacy', email: 'mina@example.com', phone: '+201115554444', _count: { clientOrders: 9 } },
-]
-const dashboardDemo: DashboardData = { clients: 284, captains: 42, pendingCaptains: 6, openOrders: 18, completedOrders: 1268, revenue: 184520, commission: 18452, recentOrders: ordersDemo.slice(0, 4) }
-const weekly = [{ day: '03 Oct', revenue: 2440 }, { day: '04 Oct', revenue: 3100 }, { day: '05 Oct', revenue: 2840 }, { day: '06 Oct', revenue: 4120 }, { day: '07 Oct', revenue: 3690 }, { day: '08 Oct', revenue: 4830 }, { day: '09 Oct', revenue: 4210 }]
-const navigation = [
-  { label: 'Overview', to: '/', icon: LayoutDashboard }, { label: 'Orders', to: '/orders', icon: ClipboardList, badge: '18' },
-  { label: 'Captains', to: '/captains', icon: Bike, badge: '6' }, { label: 'Clients', to: '/clients', icon: Users },
-  { label: 'Wallets', to: '/wallets', icon: WalletCards }, { label: 'Reports', to: '/reports', icon: Activity },
-]
+
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'
+const TODAY_LABEL = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase()
+
+class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+function handleUnauthorized() {
+  localStorage.removeItem('wasalny-admin-token')
+  if (window.location.pathname !== '/login') window.location.assign('/login')
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('wasalny-admin-token')
-  const response = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'}${path}`, {
-    ...init, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init?.headers },
-  })
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).message ?? `Request failed (${response.status})`)
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init?.headers },
+    })
+  } catch {
+    throw new ApiError(`Cannot reach the API at ${API_BASE} (server down, network issue, or CORS blocked).`, 0)
+  }
+  if (response.status === 401) {
+    if (!path.startsWith('/auth/')) handleUnauthorized()
+    throw new ApiError('Your session has expired or the credentials are invalid.', 401)
+  }
+  if (!response.ok) throw new ApiError((await response.json().catch(() => ({}))).message ?? `Request failed (${response.status})`, response.status)
   return response.json() as Promise<T>
 }
-function useData<T>(key: string, path: string, fallback: T) {
-  return useQuery({ queryKey: [key], queryFn: () => localStorage.getItem('wasalny-admin-token') ? api<T>(path) : Promise.resolve(fallback) })
+function useData<T>(key: string, path: string) {
+  return useQuery<T, ApiError>({ queryKey: [key], queryFn: () => api<T>(path) })
+}
+
+function QueryError({ error, retry }: { error: { message: string } | null | undefined; retry?: () => void }) {
+  if (!error) return null
+  return <div className="error-banner" role="alert"><span><strong>Data not loaded:</strong> {error.message}</span>{retry && <button className="button button-outline" onClick={() => retry()}>Retry</button>}</div>
 }
 
 function Frame() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
+  const { data: stats } = useData<DashboardData>('dashboard', '/admin/dashboard')
   const section = location.pathname.startsWith('/captains') ? 'Captains' : navigation.find((item) => item.to === location.pathname)?.label ?? (location.pathname === '/pricing' ? 'Pricing' : 'Settings')
   return <div className="shell"><aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}>
     <Link to="/" className="brand" onClick={() => setMenuOpen(false)}><span className="brand-mark"><Boxes size={19} /></span>wasalny<span className="brand-light">orders</span></Link>
     <div className="workspace"><span className="workspace-avatar">W</span><span><strong>Wasalny Logistics</strong><small>Operations workspace</small></span><ChevronDown size={15} /></div>
-    <span className="nav-caption">WORKSPACE</span><nav className="main-nav">{navigation.map(({ label, to, icon: Icon, badge }) => <NavLink key={to} to={to} end={to === '/'} onClick={() => setMenuOpen(false)} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><Icon size={18} /><span>{label}</span>{badge && <b>{badge}</b>}</NavLink>)}</nav>
+    <span className="nav-caption">WORKSPACE</span><nav className="main-nav">{navigation.map(({ label, to, icon: Icon, stat }) => { const badge = stat ? stats?.[stat] : undefined; return <NavLink key={to} to={to} end={to === '/'} onClick={() => setMenuOpen(false)} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><Icon size={18} /><span>{label}</span>{badge != null && badge > 0 && <b>{badge}</b>}</NavLink> })}</nav>
     <span className="nav-caption nav-caption-bottom">MANAGE</span><nav className="main-nav"><NavLink to="/pricing" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><CircleDollarSign size={18} /><span>Pricing</span></NavLink><NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><Settings2 size={18} /><span>Settings</span></NavLink></nav>
     <div className="sidebar-bottom"><div className="help-row"><span className="help-icon"><LifeBuoy size={17} /></span><span><strong>Need a hand?</strong><small>Visit the help center</small></span></div><div className="account-row"><span className="account-avatar">AM</span><span><strong>Admin Manager</strong><small>Administrator</small></span><MoreHorizontal size={18} /></div></div>
   </aside>{menuOpen && <button className="mobile-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation" />}
@@ -75,8 +90,8 @@ function Frame() {
 function Heading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
   return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div>
 }
-function Metric({ label, value, change, icon: Icon, tone = 'mint' }: { label: string; value: string; change: string; icon: typeof Users; tone?: string }) {
-  return <article className="metric-card"><div className="metric-top"><span>{label}</span><span className={`metric-icon ${tone}`}><Icon size={17} /></span></div><div className="metric-value">{value}</div><div className="metric-foot"><span className="trend"><ArrowUpRight size={13} />{change}</span><span>vs last week</span></div></article>
+function Metric({ label, value, change, icon: Icon, tone = 'mint' }: { label: string; value: string; change?: string; icon: typeof Users; tone?: string }) {
+  return <article className="metric-card"><div className="metric-top"><span>{label}</span><span className={`metric-icon ${tone}`}><Icon size={17} /></span></div><div className="metric-value">{value}</div>{change && <div className="metric-foot"><span className="trend"><ArrowUpRight size={13} />{change}</span><span>vs last week</span></div>}</article>
 }
 function Status({ value }: { value: string }) {
   const labels: Record<string, string> = { PENDING: 'Pending', SEARCHING_CAPTAIN: 'Finding captain', ACCEPTED: 'Accepted', ARRIVED_AT_PICKUP: 'At pickup', PICKED_UP: 'Picked up', ON_THE_WAY: 'On the way', DELIVERED: 'Delivered', COMPLETED: 'Completed', CANCELLED: 'Cancelled', ACTIVE: 'Approved', REJECTED: 'Rejected', SUSPENDED: 'Suspended' }
@@ -90,26 +105,32 @@ function Toolbar({ value, setValue, placeholder }: { value: string; setValue: (v
 }
 
 function Overview() {
-  const { data = dashboardDemo } = useData<DashboardData>('dashboard', '/admin/dashboard', dashboardDemo)
-  const { data: rows = ordersDemo } = useData<Order[]>('orders', '/admin/orders', ordersDemo)
-  const demo = !localStorage.getItem('wasalny-admin-token')
-  return <><Heading eyebrow="THURSDAY, 09 OCTOBER 2026" title="Good morning, team" description="Here's what's moving across Wasalny today." action={<div className="heading-actions"><span className={`sync-state ${demo ? 'demo-state' : ''}`}><i />{demo ? 'Sample workspace' : 'Live data'}</span><button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export</button></div>} />
-    <section className="metric-grid"><Metric label="Gross delivery value" value={`EGP ${Number(data.revenue).toLocaleString()}`} change="12.8%" icon={CircleDollarSign} /><Metric label="Orders in progress" value={String(data.openOrders)} change="8.2%" icon={ClipboardList} tone="blue" /><Metric label="Active captains" value={String(data.captains)} change="4.6%" icon={Bike} tone="orange" /><Metric label="Registered clients" value={String(data.clients)} change="2.1%" icon={Users} tone="rose" /></section>
-    <section className="overview-grid"><article className="panel activity-panel"><div className="panel-heading"><div><div className="panel-kicker">PERFORMANCE</div><h2>Delivery activity</h2></div><button className="select-control">Last 7 days <ChevronDown size={14} /></button></div><div className="chart-legend"><span><i className="legend-revenue" />Delivery value</span><strong>EGP 24,230 <small>+14.2%</small></strong></div><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={weekly} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3ca889" stopOpacity={.18} /><stop offset="100%" stopColor="#3ca889" stopOpacity={.01} /></linearGradient></defs><CartesianGrid vertical={false} stroke="#edf0ed" strokeDasharray="3 4" /><XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fill: '#929b94', fontSize: 11 }} /><YAxis tickLine={false} axisLine={false} tick={{ fill: '#929b94', fontSize: 11 }} tickFormatter={(value: number) => `${value / 1000}k`} /><Tooltip formatter={(value) => [`EGP ${Number(value).toLocaleString()}`, 'Delivery value']} /><Area type="monotone" dataKey="revenue" stroke="#23886d" strokeWidth={2.5} fill="url(#fill)" activeDot={{ r: 4 }} /></AreaChart></ResponsiveContainer></div></article>
-      <article className="panel attention-panel"><div className="panel-heading"><div><div className="panel-kicker">NEEDS ATTENTION</div><h2>On your radar</h2></div><span className="attention-count">{data.pendingCaptains + 2}</span></div><div className="attention-list"><Link to="/captains" className="attention-item"><span className="attention-icon attention-amber"><ShieldCheck size={17} /></span><span><strong>Captain applications</strong><small>{data.pendingCaptains} waiting for review</small></span><ArrowRight size={16} /></Link><Link to="/orders" className="attention-item"><span className="attention-icon attention-blue"><ClipboardList size={17} /></span><span><strong>Orders need a captain</strong><small>2 orders searching for 15+ min</small></span><ArrowRight size={16} /></Link><Link to="/wallets" className="attention-item"><span className="attention-icon attention-coral"><WalletCards size={17} /></span><span><strong>Low captain balances</strong><small>4 captains below EGP 50</small></span><ArrowRight size={16} /></Link></div><div className="attention-footer"><span><i /> All other operations are on track</span></div></article></section>
-    <section className="panel table-panel"><div className="panel-heading table-heading"><div><div className="panel-kicker">LIVE OPERATIONS</div><h2>Recent orders</h2></div><Link to="/orders" className="text-link">View all orders <ArrowRight size={15} /></Link></div><OrdersTable rows={rows.slice(0, 5)} /></section><div className="dashboard-foot"><span><i /> Updated just now</span><span>Delivery commission earned <strong>EGP {Number(data.commission).toLocaleString()}</strong> this month</span></div>
+  const dashboard = useData<DashboardData>('dashboard', '/admin/dashboard')
+  const orders = useData<Order[]>('orders', '/admin/orders')
+  const data = dashboard.data
+  const rows = orders.data ?? []
+  const today = TODAY_LABEL
+  return <><Heading eyebrow={today} title="Good morning, team" description="Here's what's moving across Wasalny today." action={<div className="heading-actions"><button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export</button></div>} />
+    <QueryError error={dashboard.error} retry={dashboard.refetch} />
+    <QueryError error={orders.error} retry={orders.refetch} />
+    <section className="metric-grid"><Metric label="Gross delivery value" value={`EGP ${Number(data?.revenue ?? 0).toLocaleString()}`} icon={CircleDollarSign} /><Metric label="Orders in progress" value={String(data?.openOrders ?? 0)} icon={ClipboardList} tone="blue" /><Metric label="Active captains" value={String(data?.captains ?? 0)} icon={Bike} tone="orange" /><Metric label="Registered clients" value={String(data?.clients ?? 0)} icon={Users} tone="rose" /></section>
+    <section className="overview-grid"><article className="panel activity-panel"><div className="panel-heading"><div><div className="panel-kicker">PERFORMANCE</div><h2>Delivery activity</h2></div></div><div className="chart-placeholder">غير متاح بعد — لا توجد سلسلة إيرادات منشورة من الـ API حتى الآن.</div></article>
+      <article className="panel attention-panel"><div className="panel-heading"><div><div className="panel-kicker">NEEDS ATTENTION</div><h2>On your radar</h2></div><span className="attention-count">{data?.pendingCaptains ?? 0}</span></div><div className="attention-list"><Link to="/captains" className="attention-item"><span className="attention-icon attention-amber"><ShieldCheck size={17} /></span><span><strong>Captain applications</strong><small>{data?.pendingCaptains ?? 0} waiting for review</small></span><ArrowRight size={16} /></Link></div><div className="attention-footer"><span><i /> Pending applications show up here from live data</span></div></article></section>
+    <section className="panel table-panel"><div className="panel-heading table-heading"><div><div className="panel-kicker">LIVE OPERATIONS</div><h2>Recent orders</h2></div><Link to="/orders" className="text-link">View all orders <ArrowRight size={15} /></Link></div>{orders.error ? null : rows.length === 0 ? <div className="empty-inline">{orders.isPending ? 'Loading…' : 'No orders yet.'}</div> : <OrdersTable rows={rows.slice(0, 5)} />}</section><div className="dashboard-foot"><span><i /> {dashboard.isPending ? 'Loading…' : dashboard.error ? 'Stats unavailable' : 'Updated just now'}</span><span>Delivery commission earned <strong>EGP {Number(data?.commission ?? 0).toLocaleString()}</strong> this month</span></div>
   </>
 }
 function OrdersPage() {
   const cache = useQueryClient()
   const [search, setSearch] = useState('')
-  const { data = ordersDemo } = useData<Order[]>('orders', '/admin/orders', ordersDemo)
-  const { data: captains = captainsDemo } = useData<Captain[]>('captains', '/admin/captains', captainsDemo)
-  const update = useMutation({ mutationFn: ({ id, changes }: { id: string; changes: { status?: string; captainId?: string } }) => api(`/admin/orders/${id}`, { method: 'PATCH', body: JSON.stringify(changes) }), onSuccess: () => cache.invalidateQueries({ queryKey: ['orders'] }) })
+  const [actionError, setActionError] = useState('')
+  const orders = useData<Order[]>('orders', '/admin/orders')
+  const captains = useData<Captain[]>('captains', '/admin/captains')
+  const data = orders.data ?? []
+  const update = useMutation({ mutationFn: ({ id, changes }: { id: string; changes: { status?: string; captainId?: string } }) => api(`/admin/orders/${id}`, { method: 'PATCH', body: JSON.stringify(changes) }), onSuccess: () => { setActionError(''); cache.invalidateQueries({ queryKey: ['orders'] }) }, onError: (error) => setActionError(error.message) })
   const filtered = data.filter((row) => `${row.reference} ${row.pickupLabel} ${row.deliveryLabel} ${row.client?.name ?? ''}`.toLowerCase().includes(search.toLowerCase()))
   const editable = Boolean(localStorage.getItem('wasalny-admin-token'))
   const statuses = ['PENDING', 'SEARCHING_CAPTAIN', 'ACCEPTED', 'ARRIVED_AT_PICKUP', 'PICKED_UP', 'ON_THE_WAY', 'DELIVERED', 'COMPLETED', 'CANCELLED']
-  return <><Heading eyebrow="DELIVERY OPERATIONS" title="Orders" description="Track every shipment from pickup request to completion." action={<button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export orders</button>} /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search by order, place, or client" /><div className="table-scroll"><table><thead><tr><th>ORDER</th><th>ROUTE</th><th>CLIENT</th><th>VALUE</th><th>STATUS</th><th>CAPTAIN</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td><strong className="mono">{row.reference}</strong></td><td><div className="route-cell"><span>{row.pickupLabel}</span><span>{row.deliveryLabel}</span></div></td><td>{row.client?.name ?? '—'}</td><td className="amount">EGP {Number(row.price).toFixed(0)}</td><td><select aria-label={`Change ${row.reference} status`} className="table-select" value={row.status} disabled={!editable || update.isPending} onChange={(event) => update.mutate({ id: row.id, changes: { status: event.target.value } })}>{statuses.map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}</select></td><td><select aria-label={`Assign ${row.reference} captain`} className="table-select captain-select" value={row.captain?.id ?? ''} disabled={!editable || update.isPending} onChange={(event) => update.mutate({ id: row.id, changes: { captainId: event.target.value } })}><option value="">Unassigned</option>{captains.filter((captain) => captain.status === 'ACTIVE').map((captain) => <option key={captain.user.id} value={captain.user.id}>{captain.user.name}</option>)}</select></td></tr>)}</tbody></table></div></section></>
+  return <><Heading eyebrow="DELIVERY OPERATIONS" title="Orders" description="Track every shipment from pickup request to completion." action={<button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export orders</button>} /><QueryError error={orders.error} retry={orders.refetch} /><QueryError error={actionError ? { message: actionError } : null} retry={() => setActionError('')} /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search by order, place, or client" /><div className="table-scroll"><table><thead><tr><th>ORDER</th><th>ROUTE</th><th>CLIENT</th><th>VALUE</th><th>STATUS</th><th>CAPTAIN</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td><strong className="mono">{row.reference}</strong></td><td><div className="route-cell"><span>{row.pickupLabel}</span><span>{row.deliveryLabel}</span></div></td><td>{row.client?.name ?? '—'}</td><td className="amount">EGP {Number(row.price).toFixed(0)}</td><td><select aria-label={`Change ${row.reference} status`} className="table-select" value={row.status} disabled={!editable || update.isPending} onChange={(event) => update.mutate({ id: row.id, changes: { status: event.target.value } })}>{statuses.map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}</select></td><td><select aria-label={`Assign ${row.reference} captain`} className="table-select captain-select" value={row.captain?.id ?? ''} disabled={!editable || update.isPending} onChange={(event) => update.mutate({ id: row.id, changes: { captainId: event.target.value } })}><option value="">Unassigned</option>{(captains.data ?? []).filter((captain) => captain.status === 'ACTIVE').map((captain) => <option key={captain.user.id} value={captain.user.id}>{captain.user.name}</option>)}</select></td></tr>)}</tbody></table></div>{!orders.error && filtered.length === 0 && <div className="empty-inline">{orders.isPending ? 'Loading…' : 'No orders match this search.'}</div>}</section></>
 }
 const captainDocFields = [
   ['identity', 'National ID (front)', 'nationalIdDocument'],
@@ -131,9 +152,10 @@ function useAuthBlobUrl(userId: string, docType: string, uploaded: boolean) {
     let objectUrl: string | null = null
     let cancelled = false
     setState('loading')
-    fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'}/admin/captains/${userId}/documents/${docType}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/admin/captains/${userId}/documents/${docType}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (response) => {
-        if (!response.ok) throw new Error('missing')
+        if (response.status === 401) { handleUnauthorized(); throw new Error('unauthorized') }
+        if (!response.ok) throw new Error(response.status === 404 ? 'missing' : 'failed')
         const blob = await response.blob()
         if (cancelled) return
         objectUrl = URL.createObjectURL(blob)
@@ -148,7 +170,8 @@ function useAuthBlobUrl(userId: string, docType: string, uploaded: boolean) {
 
 function DocumentTile({ userId, docType, label, uploaded }: { userId: string; docType: string; label: string; uploaded: boolean }) {
   const { url, state } = useAuthBlobUrl(userId, docType, uploaded)
-  if (state === 'missing' || state === 'error') return <div className="doc-tile doc-missing"><span>{label}</span><small>Not uploaded</small></div>
+  if (state === 'missing') return <div className="doc-tile doc-missing"><span>{label}</span><small>Not uploaded</small></div>
+  if (state === 'error') return <div className="doc-tile doc-missing"><span>{label}</span><small>Failed to load</small></div>
   if (!url) return <div className="doc-tile doc-missing"><span>{label}</span><small>Loading…</small></div>
   return <figure className="doc-tile"><a href={url} target="_blank" rel="noreferrer"><img src={url} alt={label} /></a><figcaption>{label}</figcaption></figure>
 }
@@ -161,7 +184,8 @@ function CaptainReviewPage() {
   const { userId = '' } = useParams()
   const cache = useQueryClient()
   const editable = Boolean(localStorage.getItem('wasalny-admin-token'))
-  const { data: captain, isLoading } = useQuery({
+  useEffect(() => { if (!editable) handleUnauthorized() }, [editable])
+  const { data: captain, isLoading, error, refetch } = useQuery({
     queryKey: ['captain', userId],
     queryFn: () => api<Captain>(`/admin/captains/${userId}`),
     enabled: editable && Boolean(userId),
@@ -179,9 +203,10 @@ function CaptainReviewPage() {
     onSuccess: () => { setRejectOpen(false); setReason(''); setMessage('Application rejected. The captain can see the reason and resubmit documents.'); cache.invalidateQueries({ queryKey: ['captain', userId] }); cache.invalidateQueries({ queryKey: ['captains'] }) },
     onError: (error) => setMessage(error.message),
   })
-  if (!editable) return <><Heading eyebrow="CAPTAIN REVIEW" title="Sign in required" description="Connect an administrator account from Settings to review applications." /></>
+  if (!editable) return <><Heading eyebrow="CAPTAIN REVIEW" title="Sign in required" description="Sign in from the login page to review applications." /></>
+  if (error) return <><Heading eyebrow="CAPTAIN REVIEW" title="Could not load this application" description="The captain application could not be fetched from the API." /><QueryError error={error} retry={refetch} /></>
   if (isLoading || !captain) return <><Heading eyebrow="CAPTAIN REVIEW" title={isLoading ? 'Loading…' : 'Application not found'} description={isLoading ? 'Fetching the captain application.' : 'This captain application does not exist.'} /></>
-  const missingDocs = captainDocFields.filter(([, , field]) => !captain[field as keyof Captain] || captain[field as keyof Captain] === 'PENDING_UPLOAD')
+  const missingDocs = captainDocFields.filter(([, , field]) => !isDocUploaded(captain[field as keyof Captain] as string | null | undefined))
   const canApprove = missingDocs.length === 0 && captain.status !== 'ACTIVE'
   return <>
     <Heading
@@ -225,7 +250,7 @@ function CaptainReviewPage() {
         <div className="panel-heading"><div><div className="panel-kicker">DOCUMENTS</div><h2>{missingDocs.length === 0 ? 'All 7 documents uploaded' : `${missingDocs.length} of 7 documents missing`}</h2></div></div>
         <div className="doc-grid">
           {captainDocFields.map(([docType, label, field]) => (
-            <DocumentTile key={docType} userId={userId} docType={docType} label={label} uploaded={Boolean(captain[field as keyof Captain] && captain[field as keyof Captain] !== 'PENDING_UPLOAD')} />
+            <DocumentTile key={docType} userId={userId} docType={docType} label={label} uploaded={isDocUploaded(captain[field as keyof Captain] as string | null | undefined)} />
           ))}
         </div>
       </section>
@@ -246,12 +271,13 @@ function CaptainReviewPage() {
 
 function CaptainsPage() {
   const [filter, setFilter] = useState('PENDING')
-  const { data = [] } = useData<Captain[]>('captains', '/admin/captains', captainsDemo)
+  const captains = useData<Captain[]>('captains', '/admin/captains')
   const [search, setSearch] = useState('')
+  const data = captains.data ?? []
   const filtered = data.filter((row) => (filter === 'ALL' || row.status === filter) && `${row.user.name} ${row.user.email}`.toLowerCase().includes(search.toLowerCase()))
   const pendingCount = data.filter((row) => row.status === 'PENDING').length
   const filters = ['ALL', 'PENDING', 'ACTIVE', 'REJECTED', 'SUSPENDED']
-  return <><Heading eyebrow="FLEET MANAGEMENT" title="Captains" description="Review applications and manage your delivery fleet." action={<span className="pending-chip">{pendingCount} applications to review</span>} /><section className="panel table-panel">
+  return <><Heading eyebrow="FLEET MANAGEMENT" title="Captains" description="Review applications and manage your delivery fleet." action={<span className="pending-chip">{applicationReviewLabel(pendingCount)}</span>} /><QueryError error={captains.error} retry={captains.refetch} /><section className="panel table-panel">
     <div className="table-toolbar"><label className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search captains" /></label><div className="filter-chips">{filters.map((value) => <button key={value} className={`chip ${filter === value ? 'chip-active' : ''}`} onClick={() => setFilter(value)}>{value === 'ALL' ? 'All' : value === 'ACTIVE' ? 'Approved' : value.charAt(0) + value.slice(1).toLowerCase()}</button>)}</div></div>
     <div className="table-scroll"><table><thead><tr><th>CAPTAIN</th><th>VEHICLE</th><th>NATIONAL ID</th><th>WALLET</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}>
       <td><div className="person-cell"><span className="person-avatar">{row.user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><strong>{row.user.name}</strong><small>{row.user.email}</small></span></div></td>
@@ -260,47 +286,58 @@ function CaptainsPage() {
       <td className="amount">EGP {Number(row.user.wallet?.balance ?? 0).toFixed(0)}</td>
       <td><Status value={row.status} /></td>
       <td><Link className="text-link" to={`/captains/${row.user.id}`}><Eye size={14} /> Review</Link></td>
-    </tr>)}</tbody></table></div>{filtered.length === 0 && <div className="empty-inline">No captains match this filter.</div>}</section></>
+    </tr>)}</tbody></table></div>{!captains.error && filtered.length === 0 && <div className="empty-inline">{captains.isPending ? 'Loading…' : 'No captains match this filter.'}</div>}</section></>
 }
 function ClientsPage() {
   const cache = useQueryClient()
-  const { data = clientsDemo } = useData<Client[]>('clients', '/admin/clients', clientsDemo)
-  const suspension = useMutation({ mutationFn: ({ id, suspended }: { id: string; suspended: boolean }) => api(`/admin/users/${id}/suspension`, { method: 'PATCH', body: JSON.stringify({ suspended }) }), onSuccess: () => cache.invalidateQueries({ queryKey: ['clients'] }) })
+  const clients = useData<Client[]>('clients', '/admin/clients')
+  const [actionError, setActionError] = useState('')
+  const suspension = useMutation({ mutationFn: ({ id, suspended }: { id: string; suspended: boolean }) => api(`/admin/users/${id}/suspension`, { method: 'PATCH', body: JSON.stringify({ suspended }) }), onSuccess: () => { setActionError(''); cache.invalidateQueries({ queryKey: ['clients'] }) }, onError: (error) => setActionError(error.message) })
   const [search, setSearch] = useState('')
   const editable = Boolean(localStorage.getItem('wasalny-admin-token'))
-  const rows = data.filter((row) => `${row.name} ${row.email}`.toLowerCase().includes(search.toLowerCase()))
-  return <><Heading eyebrow="CUSTOMER DIRECTORY" title="Clients" description="Manage shipment senders and their account activity." /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search clients" /><div className="table-scroll"><table><thead><tr><th>CLIENT</th><th>PHONE</th><th>ORDERS</th><th>ACCOUNT</th><th>ACTIONS</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><div className="person-cell"><span className="person-avatar client-avatar">{row.name.slice(0, 2).toUpperCase()}</span><span><strong>{row.name}</strong><small>{row.email}</small></span></div></td><td>{row.phone ?? '—'}</td><td>{row._count?.clientOrders ?? 0}</td><td><Status value={row.suspendedAt ? 'SUSPENDED' : 'ACTIVE'} /></td><td><button className="text-action" disabled={!editable || suspension.isPending} onClick={() => suspension.mutate({ id: row.id, suspended: !row.suspendedAt })}>{row.suspendedAt ? 'Restore' : 'Suspend'}</button></td></tr>)}</tbody></table></div></section></>
+  const rows = (clients.data ?? []).filter((row) => `${row.name} ${row.email}`.toLowerCase().includes(search.toLowerCase()))
+  return <><Heading eyebrow="CUSTOMER DIRECTORY" title="Clients" description="Manage shipment senders and their account activity." /><QueryError error={clients.error} retry={clients.refetch} /><QueryError error={actionError ? { message: actionError } : null} retry={() => setActionError('')} /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search clients" /><div className="table-scroll"><table><thead><tr><th>CLIENT</th><th>PHONE</th><th>ORDERS</th><th>ACCOUNT</th><th>ACTIONS</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><div className="person-cell"><span className="person-avatar client-avatar">{row.name.slice(0, 2).toUpperCase()}</span><span><strong>{row.name}</strong><small>{row.email}</small></span></div></td><td>{row.phone ?? '—'}</td><td>{row._count?.clientOrders ?? 0}</td><td><Status value={row.suspendedAt ? 'SUSPENDED' : 'ACTIVE'} /></td><td><button className="text-action" disabled={!editable || suspension.isPending} onClick={() => suspension.mutate({ id: row.id, suspended: !row.suspendedAt })}>{row.suspendedAt ? 'Restore' : 'Suspend'}</button></td></tr>)}</tbody></table></div>{!clients.error && rows.length === 0 && <div className="empty-inline">{clients.isPending ? 'Loading…' : 'No clients match this search.'}</div>}</section></>
 }
 function PricingPage() {
   const cache = useQueryClient()
   const defaults: Pricing = { basePrice: 30, pricePerKm: 8, commissionPercent: 10, minimumWalletBalance: 0 }
-  const { data = defaults } = useData<Pricing>('pricing', '/admin/pricing', defaults)
+  const pricing = useData<Pricing>('pricing', '/admin/pricing')
   const [form, setForm] = useState<Pricing>(defaults)
   const [saved, setSaved] = useState(false)
-  useEffect(() => setForm(data), [data])
-  const mutation = useMutation({ mutationFn: () => api('/admin/pricing', { method: 'PATCH', body: JSON.stringify(form) }), onSuccess: () => { setSaved(true); cache.invalidateQueries({ queryKey: ['pricing'] }) } })
-  return <><Heading eyebrow="COMMERCIAL RULES" title="Pricing & commission" description="Set transparent, automatic rates for ready-shipment deliveries." /><div className="settings-grid"><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">DELIVERY RATE</div><h2>Price calculation</h2></div><span className="settings-icon"><CircleDollarSign size={18} /></span></div><p className="settings-copy">Each order is priced from its pickup-to-dropoff distance. Clients see the final amount before confirming.</p><div className="field-grid"><label>Base price<span className="money-input"><span>EGP</span><input type="number" min="0" value={form.basePrice} onChange={(event) => setForm({ ...form, basePrice: Number(event.target.value) })} /></span></label><label>Price per kilometre<span className="money-input"><span>EGP</span><input type="number" min="0" value={form.pricePerKm} onChange={(event) => setForm({ ...form, pricePerKm: Number(event.target.value) })} /></span></label></div><div className="formula-note"><span>RATE FORMULA</span><strong>Base price + (distance × per km rate)</strong></div></section><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">CAPTAIN EARNINGS</div><h2>Commission & wallet</h2></div><span className="settings-icon orange-icon"><WalletCards size={18} /></span></div><p className="settings-copy">Commission is reserved from a captain's wallet when an order is accepted.</p><div className="field-grid"><label>Company commission<span className="money-input"><input type="number" min="0" max="100" value={form.commissionPercent} onChange={(event) => setForm({ ...form, commissionPercent: Number(event.target.value) })} /><span>%</span></span></label><label>Minimum wallet balance<span className="money-input"><span>EGP</span><input type="number" min="0" value={form.minimumWalletBalance} onChange={(event) => setForm({ ...form, minimumWalletBalance: Number(event.target.value) })} /></span></label></div><div className="formula-note"><span>DEFAULT COMMISSION</span><strong>{form.commissionPercent}% per delivery</strong></div></section><div className="settings-save"><span>{saved ? 'Pricing changes saved.' : 'Changes apply to new orders only.'}</span><button className="button button-primary" onClick={() => mutation.mutate()} disabled={mutation.isPending}><Check size={15} />{mutation.isPending ? 'Saving…' : 'Save changes'}</button></div></div></>
+  const [saveError, setSaveError] = useState('')
+  useEffect(() => { if (pricing.data) setForm(pricing.data) }, [pricing.data])
+  const mutation = useMutation({ mutationFn: () => { if (!pricing.data) return Promise.reject(new Error('Pricing has not loaded from the API yet.')); return api('/admin/pricing', { method: 'PATCH', body: JSON.stringify(form) }) }, onSuccess: () => { setSaved(true); setSaveError(''); cache.invalidateQueries({ queryKey: ['pricing'] }) }, onError: (error) => setSaveError(error.message) })
+  return <><Heading eyebrow="COMMERCIAL RULES" title="Pricing & commission" description="Set transparent, automatic rates for ready-shipment deliveries." /><QueryError error={pricing.error} retry={pricing.refetch} /><QueryError error={saveError ? { message: saveError } : null} retry={() => setSaveError('')} /><div className="settings-grid"><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">DELIVERY RATE</div><h2>Price calculation</h2></div><span className="settings-icon"><CircleDollarSign size={18} /></span></div><p className="settings-copy">Each order is priced from its pickup-to-dropoff distance. Clients see the final amount before confirming.</p><div className="field-grid"><label>Base price<span className="money-input"><span>EGP</span><input type="number" min="0" value={form.basePrice} onChange={(event) => setForm({ ...form, basePrice: Number(event.target.value) })} /></span></label><label>Price per kilometre<span className="money-input"><span>EGP</span><input type="number" min="0" value={form.pricePerKm} onChange={(event) => setForm({ ...form, pricePerKm: Number(event.target.value) })} /></span></label></div><div className="formula-note"><span>RATE FORMULA</span><strong>Base price + (distance × per km rate)</strong></div></section><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">CAPTAIN EARNINGS</div><h2>Commission & wallet</h2></div><span className="settings-icon orange-icon"><WalletCards size={18} /></span></div><p className="settings-copy">Commission is reserved from a captain's wallet when an order is accepted.</p><div className="field-grid"><label>Company commission<span className="money-input"><input type="number" min="0" max="100" value={form.commissionPercent} onChange={(event) => setForm({ ...form, commissionPercent: Number(event.target.value) })} /><span>%</span></span></label><label>Minimum wallet balance<span className="money-input"><span>EGP</span><input type="number" min="0" value={form.minimumWalletBalance} onChange={(event) => setForm({ ...form, minimumWalletBalance: Number(event.target.value) })} /></span></label></div><div className="formula-note"><span>DEFAULT COMMISSION</span><strong>{form.commissionPercent}% per delivery</strong></div></section><div className="settings-save"><span>{saved ? 'Pricing changes saved.' : 'Changes apply to new orders only.'}</span><button className="button button-primary" onClick={() => mutation.mutate()} disabled={mutation.isPending}><Check size={15} />{mutation.isPending ? 'Saving…' : 'Save changes'}</button></div></div></>
 }
 function WalletsPage() {
-  const { data = [] } = useData<WalletRecord[]>('wallets', '/admin/wallets', [])
+  const wallets = useData<WalletRecord[]>('wallets', '/admin/wallets')
+  const data = wallets.data ?? []
   const totalBalance = data.reduce((sum, row) => sum + Number(row.wallet?.balance ?? 0), 0)
   const transactions = data.flatMap((row) => row.walletTransactions.map((transaction) => ({ ...transaction, captain: row.name }))).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 100)
-  return <><Heading eyebrow="CAPTAIN FINANCES" title="Wallets & transactions" description="Monitor captain balances, commission reservations, and top-ups." /><section className="metric-grid report-metrics"><Metric label="Captain wallets" value={String(data.length)} change="Active accounts" icon={Bike} /><Metric label="Total available balance" value={`EGP ${totalBalance.toLocaleString()}`} change="Across all captains" icon={WalletCards} tone="blue" /></section><section className="panel table-panel"><div className="panel-heading table-heading"><div><div className="panel-kicker">WALLET LEDGER</div><h2>Recent transactions</h2></div></div><div className="table-scroll"><table><thead><tr><th>CAPTAIN</th><th>TYPE</th><th>DETAIL</th><th>DATE</th><th>AMOUNT</th></tr></thead><tbody>{transactions.map((transaction) => <tr key={transaction.id}><td>{transaction.captain}</td><td>{transaction.type.replaceAll('_', ' ')}</td><td>{transaction.note ?? '—'}</td><td>{new Date(transaction.createdAt).toLocaleString()}</td><td className="amount">EGP {Number(transaction.amount).toFixed(2)}</td></tr>)}</tbody></table></div>{transactions.length === 0 && <div className="empty-inline">No wallet transactions recorded yet.</div>}</section></>
+  return <><Heading eyebrow="CAPTAIN FINANCES" title="Wallets & transactions" description="Monitor captain balances, commission reservations, and top-ups." /><QueryError error={wallets.error} retry={wallets.refetch} /><section className="metric-grid report-metrics"><Metric label="Captain wallets" value={String(data.length)} change="Active accounts" icon={Bike} /><Metric label="Total available balance" value={`EGP ${totalBalance.toLocaleString()}`} change="Across all captains" icon={WalletCards} tone="blue" /></section><section className="panel table-panel"><div className="panel-heading table-heading"><div><div className="panel-kicker">WALLET LEDGER</div><h2>Recent transactions</h2></div></div><div className="table-scroll"><table><thead><tr><th>CAPTAIN</th><th>TYPE</th><th>DETAIL</th><th>DATE</th><th>AMOUNT</th></tr></thead><tbody>{transactions.map((transaction) => <tr key={transaction.id}><td>{transaction.captain}</td><td>{transaction.type.replaceAll('_', ' ')}</td><td>{transaction.note ?? '—'}</td><td>{new Date(transaction.createdAt).toLocaleString()}</td><td className="amount">EGP {Number(transaction.amount).toFixed(2)}</td></tr>)}</tbody></table></div>{!wallets.error && transactions.length === 0 && <div className="empty-inline">{wallets.isPending ? 'Loading…' : 'No wallet transactions recorded yet.'}</div>}</section></>
 }
 function ReportsPage() {
-  const { data = dashboardDemo } = useData<DashboardData>('dashboard', '/admin/dashboard', dashboardDemo)
-  return <><Heading eyebrow="BUSINESS INTELLIGENCE" title="Reports" description="A clear read on completed deliveries and company earnings." action={<button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export report</button>} /><section className="metric-grid report-metrics"><Metric label="Completed deliveries" value={Number(data.completedOrders).toLocaleString()} change="10.4%" icon={Check} /><Metric label="Gross delivery value" value={`EGP ${Number(data.revenue).toLocaleString()}`} change="12.8%" icon={ArrowUpRight} tone="blue" /><Metric label="Company commission" value={`EGP ${Number(data.commission).toLocaleString()}`} change="12.8%" icon={CircleDollarSign} tone="orange" /></section><section className="panel activity-panel report-chart"><div className="panel-heading"><div><div className="panel-kicker">WEEKLY PERFORMANCE</div><h2>Delivery value</h2></div><span className="select-control">This week</span></div><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={weekly}><CartesianGrid vertical={false} stroke="#edf0ed" strokeDasharray="3 4" /><XAxis dataKey="day" tickLine={false} axisLine={false} /><YAxis tickLine={false} axisLine={false} /><Tooltip /><Area type="monotone" dataKey="revenue" stroke="#23886d" fill="#e9f4ed" /></AreaChart></ResponsiveContainer></div></section></>
+  const reports = useData<DashboardData>('dashboard', '/admin/dashboard')
+  const data = reports.data
+  return <><Heading eyebrow="BUSINESS INTELLIGENCE" title="Reports" description="A clear read on completed deliveries and company earnings." action={<button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export report</button>} /><QueryError error={reports.error} retry={reports.refetch} /><section className="metric-grid report-metrics"><Metric label="Completed deliveries" value={Number(data?.completedOrders ?? 0).toLocaleString()} icon={Check} /><Metric label="Gross delivery value" value={`EGP ${Number(data?.revenue ?? 0).toLocaleString()}`} icon={ArrowUpRight} tone="blue" /><Metric label="Company commission" value={`EGP ${Number(data?.commission ?? 0).toLocaleString()}`} icon={CircleDollarSign} tone="orange" /></section><section className="panel activity-panel report-chart"><div className="panel-heading"><div><div className="panel-kicker">WEEKLY PERFORMANCE</div><h2>Delivery value</h2></div><span className="select-control">This week</span></div><div className="chart-placeholder">غير متاح بعد — لا توجد سلسلة إيرادات أسبوعية منشورة من الـ API حتى الآن.</div></section></>
 }
 function SettingsPage() {
   const token = localStorage.getItem('wasalny-admin-token')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
-  const login = useMutation({ mutationFn: () => api<{ accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }), onSuccess: (data) => { localStorage.setItem('wasalny-admin-token', data.accessToken); setMessage('Connected. Reload the page to load live data.') }, onError: (error) => setMessage(error.message) })
+  const login = useMutation({ mutationFn: () => api<{ accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }), onSuccess: (data) => { localStorage.setItem('wasalny-admin-token', data.accessToken); window.location.assign('/') }, onError: (error) => setMessage(error.message) })
   return <><Heading eyebrow="WORKSPACE CONFIGURATION" title="Settings" description="Manage administrator access and service connectivity." /><div className="settings-grid"><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">ADMINISTRATOR ACCESS</div><h2>{token ? 'Connected session' : 'Connect your account'}</h2></div><span className="settings-icon"><ShieldCheck size={18} /></span></div>{token ? <><p className="settings-copy">This browser has an administrator access token.</p><button className="button button-outline" onClick={() => { localStorage.removeItem('wasalny-admin-token'); window.location.reload() }}>Sign out</button></> : <form className="access-form" onSubmit={(event) => { event.preventDefault(); login.mutate() }}><label>Admin email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@wasalny.app" /></label><label>Password<input type="password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label><button className="button button-primary" disabled={login.isPending}>{login.isPending ? 'Connecting…' : 'Connect administrator'}</button>{message && <p className="form-message">{message}</p>}</form>}</section><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">SERVICE STATUS</div><h2>Connected services</h2></div><span className="settings-icon"><Activity size={18} /></span></div><div className="service-list"><div><span><i /> API endpoint</span><code>{import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'}</code></div><div><span><i /> Payment processing</span><small>Ready for Kashier integration</small></div><div><span><i /> Push notifications</span><small>Firebase credentials required</small></div></div></section></div></>
 }
-function LoginPage() { return <div className="login-shell"><span className="login-mark"><Boxes size={23} /></span><div className="eyebrow">WASALNY ORDERS</div><h1>Operations, in motion.</h1><p>Connect live order, captain, and pricing data from Settings.</p><Link to="/settings" className="button button-primary">Go to settings <ArrowRight size={16} /></Link></div> }
+function AuthPage() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [message, setMessage] = useState('')
+  const navigate = useNavigate()
+  const login = useMutation({ mutationFn: () => api<{ accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }), onSuccess: (data) => { localStorage.setItem('wasalny-admin-token', data.accessToken); navigate('/', { replace: true }) }, onError: (error) => setMessage(error.message) })
+  return <div className="login-shell"><span className="login-mark"><Boxes size={23} /></span><div className="eyebrow">WASALNY ORDERS</div><h1>Administrator sign in</h1><p>Sign in to review captain applications and live operations.</p><form className="access-form login-form" onSubmit={(event) => { event.preventDefault(); login.mutate() }}><label>Admin email<input type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@wasalny.app" /></label><label>Password<input type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label><button className="button button-primary" disabled={login.isPending}>{login.isPending ? 'Signing in…' : 'Sign in'}</button>{message && <p className="form-message">{message}</p>}</form></div>
+}
 
 export default function Dashboard() {
-  return <Routes><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="captains/:userId" element={<CaptainReviewPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<LoginPage />} /></Route></Routes>
+  return <Routes><Route path="/login" element={<AuthPage />} /><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="captains/:userId" element={<CaptainReviewPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<Navigate to="/login" replace />} /></Route></Routes>
 }
