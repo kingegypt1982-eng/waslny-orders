@@ -73,19 +73,25 @@ export class AdminService {
       },
     });
     return items.map((c) => {
-      let nationalIdDecrypted: string | null = null;
-      if (c.nationalIdEncrypted) {
-        try {
-          nationalIdDecrypted = this.crypto.decrypt(c.nationalIdEncrypted);
-        } catch {
-          nationalIdDecrypted = null;
-        }
-      }
       const rest = c as any;
       delete rest.nationalIdEncrypted;
       delete rest.nationalIdHash;
-      return { ...rest, nationalIdDecrypted, nationalIdLast4: c.nationalIdLast4 };
+      return rest;
     });
+  }
+
+  async captain(userId: string) {
+    const profile = await this.prisma.captainProfile.findUnique({
+      where: { userId },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true, wallet: true } },
+      },
+    });
+    if (!profile) throw new NotFoundException('Captain application not found');
+    const rest = profile as any;
+    delete rest.nationalIdEncrypted;
+    delete rest.nationalIdHash;
+    return rest;
   }
 
   transactions(query: AdminTransactionsQueryDto) {
@@ -241,18 +247,47 @@ export class AdminService {
     return this.prisma.pricingSettings.upsert({ where: { id: 'default' }, create: input, update: input });
   }
 
-  async reviewCaptain(userId: string, status: CaptainStatus) {
+  async reviewCaptain(userId: string, status: CaptainStatus, reason?: string) {
     const current = await this.prisma.captainProfile.findUnique({ where: { userId } });
     if (!current) throw new NotFoundException('Captain application not found');
+
+    const approval = status === CaptainStatus.ACTIVE && current.status !== CaptainStatus.SUSPENDED;
+    if (approval) {
+      const docFields = [
+        'nationalIdDocument', 'nationalIdBackDocument', 'licenseDocument',
+        'licenseBackDocument', 'vehicleDocument', 'vehicleBackDocument', 'profilePhotoDocument',
+      ] as const;
+      const missing = docFields.filter((field) => !current[field] || current[field] === 'PENDING_UPLOAD');
+      if (missing.length) {
+        throw new UnprocessableEntityException(
+          `Cannot approve: ${missing.length} required document(s) have not been uploaded`,
+        );
+      }
+    }
+
+    const rejection = status === CaptainStatus.REJECTED;
+    const trimmedReason = (reason ?? '').trim();
+    if (rejection && trimmedReason.length < 3) {
+      throw new BadRequestException('A rejection reason is required');
+    }
+
     const captain = await this.prisma.captainProfile.update({
-      where: { userId }, data: { status, reviewedAt: new Date(), ...(status === CaptainStatus.ACTIVE ? { approvedAt: new Date() } : {}) },
+      where: { userId },
+      data: {
+        status,
+        reviewedAt: new Date(),
+        ...(approval ? { approvedAt: new Date(), rejectionReason: null } : {}),
+        ...(rejection ? { rejectionReason: trimmedReason } : {}),
+      },
     });
     try {
       const messages: Partial<Record<CaptainStatus, [string, string]>> = {
         [CaptainStatus.ACTIVE]: current.status === CaptainStatus.SUSPENDED
           ? ['Account restored', 'Your captain account was restored. You can accept deliveries again.']
           : ['Account approved', 'Your captain account was approved. You can now accept deliveries.'],
-        [CaptainStatus.REJECTED]: ['Application update', 'Your captain application needs attention. Please contact support.'],
+        [CaptainStatus.REJECTED]: ['Application update', trimmedReason
+          ? `Your captain application was rejected: ${trimmedReason}. You can update your documents and resubmit.`
+          : 'Your captain application needs attention. Please contact support.'],
         [CaptainStatus.SUSPENDED]: ['Account suspended', 'Your captain account was suspended. Please contact support.'],
       };
       const message = messages[status];

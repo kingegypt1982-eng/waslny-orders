@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { AdminOrderDto } from './dto/admin-order.dto';
 import { AdminCaptainsQueryDto } from './dto/admin-captains-query.dto';
+import { AdminCaptainRejectDto } from './dto/admin-captain-reject.dto';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 import { AdminTransactionsQueryDto } from './dto/admin-transactions-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
@@ -44,6 +45,7 @@ export class AdminController {
     return this.admin.updateOrder(id, body, user.id);
   }
   @Get('captains') captains(@Query() query: AdminCaptainsQueryDto) { return this.admin.captains(query); }
+  @Get('captains/:userId') captain(@Param('userId') userId: string) { return this.admin.captain(userId); }
   @Get('captains/:userId/documents/:type')
   async captainDocument(@Param('userId') userId: string, @Param('type') type: string) {
     const file = await this.admin.captainDocument(userId, type);
@@ -53,7 +55,7 @@ export class AdminController {
     });
   }
   @Post('captains/:userId/approve') approve(@Param('userId') id: string) { return this.admin.reviewCaptain(id, CaptainStatus.ACTIVE); }
-  @Post('captains/:userId/reject') reject(@Param('userId') id: string) { return this.admin.reviewCaptain(id, CaptainStatus.REJECTED); }
+  @Post('captains/:userId/reject') reject(@Param('userId') id: string, @Body() body: AdminCaptainRejectDto) { return this.admin.reviewCaptain(id, CaptainStatus.REJECTED, body.reason); }
   @Post('captains/:userId/suspend') suspendCaptain(@Param('userId') id: string) { return this.admin.reviewCaptain(id, CaptainStatus.SUSPENDED); }
   @Post('captains/:userId/unsuspend') unsuspendCaptain(@Param('userId') id: string) { return this.admin.reviewCaptain(id, CaptainStatus.ACTIVE); }
   @Get('clients') clients() { return this.admin.clients(); }
