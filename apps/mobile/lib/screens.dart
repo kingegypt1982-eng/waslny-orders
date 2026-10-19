@@ -793,6 +793,15 @@ class CaptainHome extends ConsumerWidget {
               ),
               const SizedBox(height: 18),
               const _CaptainStatusSection(),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => context.push('/captain/availability'),
+                  icon: const Icon(Icons.wifi_tethering, size: 16),
+                  label: const Text('حالة التوفر والطلبات القريبة'),
+                ),
+              ),
             ],
           ),
         ),
@@ -2231,6 +2240,7 @@ class _AvailableOrderCard extends ConsumerWidget {
                         if (context.mounted) {
                           _showMessage(context, 'Delivery accepted');
                           ref.invalidate(availableOrdersProvider);
+                          context.push('/captain/trip/${order['id']}');
                         }
                       } catch (error) {
                         if (context.mounted)

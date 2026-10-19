@@ -80,12 +80,13 @@ class ApiClient {
   Future<Map<String, dynamic>> uploadFile(
     String path,
     Uint8List bytes,
-    String filename,
-  ) async {
+    String filename, {
+    String field = 'file',
+  }) async {
     final response = await dio.post<Map<String, dynamic>>(
       path,
       data: FormData.fromMap({
-        'file': MultipartFile.fromBytes(bytes, filename: filename),
+        field: MultipartFile.fromBytes(bytes, filename: filename),
       }),
     );
     return response.data ?? {};

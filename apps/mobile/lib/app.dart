@@ -6,7 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
 import 'screens.dart';
+import 'screens/captain_availability_screen.dart';
 import 'screens/captain_start_screen.dart';
+import 'screens/captain_trip_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'screens/order_review_screen.dart';
@@ -95,6 +97,15 @@ final routerProvider = Provider<GoRouter>(
       GoRoute(
         path: '/captain-documents',
         builder: (context, state) => const CaptainDocumentsScreen(),
+      ),
+      GoRoute(
+        path: '/captain/availability',
+        builder: (context, state) => const CaptainAvailabilityScreen(),
+      ),
+      GoRoute(
+        path: '/captain/trip/:id',
+        builder: (context, state) =>
+            CaptainTripScreen(orderId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: '/map-picker',
