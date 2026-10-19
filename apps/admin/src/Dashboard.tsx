@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, ArrowRight, ArrowUpRight, Bell, Bike, Boxes, Check, ChevronDown, CircleDollarSign, ClipboardList, Download, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react'
+import { Activity, ArrowRight, ArrowUpRight, Bell, Bike, Boxes, Check, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import './dashboard.css'
 
 type Order = { id: string; reference: string; status: string; pickupLabel: string; deliveryLabel: string; price: number; createdAt: string; client?: { name: string }; captain?: { id?: string; name: string } | null }
-type Captain = { id: string; status: string; vehicleType: string; vehiclePlate: string; createdAt: string; nationalIdDocument: string; licenseDocument: string; vehicleDocument: string; user: { id: string; name: string; email: string; wallet?: { balance: number } | null } }
+type Captain = {
+  id: string; status: string; vehicleType: string; vehiclePlate: string; createdAt: string
+  nationalIdDocument: string; nationalIdBackDocument?: string; licenseDocument: string; licenseBackDocument?: string
+  vehicleDocument: string; vehicleBackDocument?: string; profilePhotoDocument?: string
+  nationalIdLast4?: string | null; dateOfBirth?: string | null; governorate?: string | null
+  licenseNumber?: string | null; vehicleRegistrationNumber?: string | null
+  vehicleMake?: string | null; vehicleModel?: string | null; vehicleColor?: string | null
+  rejectionReason?: string | null; approvedAt?: string | null; reviewedAt?: string | null
+  user: { id: string; name: string; email: string; phone?: string | null; wallet?: { balance: number } | null }
+}
 type Client = { id: string; name: string; email: string; phone?: string; suspendedAt?: string | null; createdAt?: string; _count?: { clientOrders: number } }
 type WalletRecord = { id: string; name: string; email: string; wallet: { balance: number } | null; walletTransactions: { id: string; amount: number; type: string; createdAt: string; note?: string | null }[] }
 type DashboardData = { clients: number; captains: number; pendingCaptains: number; openOrders: number; completedOrders: number; revenue: number; commission: number; recentOrders: Order[] }
@@ -52,7 +61,7 @@ function useData<T>(key: string, path: string, fallback: T) {
 function Frame() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
-  const section = navigation.find((item) => item.to === location.pathname)?.label ?? (location.pathname === '/pricing' ? 'Pricing' : 'Settings')
+  const section = location.pathname.startsWith('/captains') ? 'Captains' : navigation.find((item) => item.to === location.pathname)?.label ?? (location.pathname === '/pricing' ? 'Pricing' : 'Settings')
   return <div className="shell"><aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}>
     <Link to="/" className="brand" onClick={() => setMenuOpen(false)}><span className="brand-mark"><Boxes size={19} /></span>wasalny<span className="brand-light">orders</span></Link>
     <div className="workspace"><span className="workspace-avatar">W</span><span><strong>Wasalny Logistics</strong><small>Operations workspace</small></span><ChevronDown size={15} /></div>
@@ -102,14 +111,156 @@ function OrdersPage() {
   const statuses = ['PENDING', 'SEARCHING_CAPTAIN', 'ACCEPTED', 'ARRIVED_AT_PICKUP', 'PICKED_UP', 'ON_THE_WAY', 'DELIVERED', 'COMPLETED', 'CANCELLED']
   return <><Heading eyebrow="DELIVERY OPERATIONS" title="Orders" description="Track every shipment from pickup request to completion." action={<button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export orders</button>} /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search by order, place, or client" /><div className="table-scroll"><table><thead><tr><th>ORDER</th><th>ROUTE</th><th>CLIENT</th><th>VALUE</th><th>STATUS</th><th>CAPTAIN</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td><strong className="mono">{row.reference}</strong></td><td><div className="route-cell"><span>{row.pickupLabel}</span><span>{row.deliveryLabel}</span></div></td><td>{row.client?.name ?? '—'}</td><td className="amount">EGP {Number(row.price).toFixed(0)}</td><td><select aria-label={`Change ${row.reference} status`} className="table-select" value={row.status} disabled={!editable || update.isPending} onChange={(event) => update.mutate({ id: row.id, changes: { status: event.target.value } })}>{statuses.map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}</select></td><td><select aria-label={`Assign ${row.reference} captain`} className="table-select captain-select" value={row.captain?.id ?? ''} disabled={!editable || update.isPending} onChange={(event) => update.mutate({ id: row.id, changes: { captainId: event.target.value } })}><option value="">Unassigned</option>{captains.filter((captain) => captain.status === 'ACTIVE').map((captain) => <option key={captain.user.id} value={captain.user.id}>{captain.user.name}</option>)}</select></td></tr>)}</tbody></table></div></section></>
 }
-function CaptainsPage() {
+const captainDocFields = [
+  ['identity', 'National ID (front)', 'nationalIdDocument'],
+  ['identity-back', 'National ID (back)', 'nationalIdBackDocument'],
+  ['license', 'Driving license (front)', 'licenseDocument'],
+  ['license-back', 'Driving license (back)', 'licenseBackDocument'],
+  ['vehicle', 'Vehicle registration (front)', 'vehicleDocument'],
+  ['vehicle-back', 'Vehicle registration (back)', 'vehicleBackDocument'],
+  ['profile-photo', 'Profile photo', 'profilePhotoDocument'],
+] as const
+
+function useAuthBlobUrl(userId: string, docType: string, uploaded: boolean) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'missing' | 'error'>('idle')
+  useEffect(() => {
+    if (!uploaded || !userId) { setState('missing'); return }
+    const token = localStorage.getItem('wasalny-admin-token')
+    if (!token) { setState('missing'); return }
+    let objectUrl: string | null = null
+    let cancelled = false
+    setState('loading')
+    fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'}/admin/captains/${userId}/documents/${docType}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('missing')
+        const blob = await response.blob()
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setUrl(objectUrl)
+        setState('ready')
+      })
+      .catch(() => { if (!cancelled) setState('error') })
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [userId, docType, uploaded])
+  return { url, state }
+}
+
+function DocumentTile({ userId, docType, label, uploaded }: { userId: string; docType: string; label: string; uploaded: boolean }) {
+  const { url, state } = useAuthBlobUrl(userId, docType, uploaded)
+  if (state === 'missing' || state === 'error') return <div className="doc-tile doc-missing"><span>{label}</span><small>Not uploaded</small></div>
+  if (!url) return <div className="doc-tile doc-missing"><span>{label}</span><small>Loading…</small></div>
+  return <figure className="doc-tile"><a href={url} target="_blank" rel="noreferrer"><img src={url} alt={label} /></a><figcaption>{label}</figcaption></figure>
+}
+
+function DetailItem({ label, value }: { label: string; value?: string | null }) {
+  return <div className="detail-item"><span>{label}</span><strong>{value?.trim() ? value : '—'}</strong></div>
+}
+
+function CaptainReviewPage() {
+  const { userId = '' } = useParams()
   const cache = useQueryClient()
-  const { data = captainsDemo } = useData<Captain[]>('captains', '/admin/captains', captainsDemo)
-  const action = useMutation({ mutationFn: ({ id, decision }: { id: string; decision: 'approve' | 'reject' }) => api(`/admin/captains/${id}/${decision}`, { method: 'POST' }), onSuccess: () => cache.invalidateQueries({ queryKey: ['captains'] }) })
-  const [search, setSearch] = useState('')
-  const filtered = data.filter((row) => `${row.user.name} ${row.user.email}`.toLowerCase().includes(search.toLowerCase()))
   const editable = Boolean(localStorage.getItem('wasalny-admin-token'))
-  return <><Heading eyebrow="FLEET MANAGEMENT" title="Captains" description="Review applications and manage your delivery fleet." action={<span className="pending-chip">{data.filter((row) => row.status === 'PENDING').length} applications to review</span>} /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search captains" /><div className="table-scroll"><table><thead><tr><th>CAPTAIN</th><th>VEHICLE</th><th>DOCUMENTS</th><th>WALLET</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}><td><div className="person-cell"><span className="person-avatar">{row.user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><strong>{row.user.name}</strong><small>{row.user.email}</small></span></div></td><td>{row.vehicleType}<small>{row.vehiclePlate}</small></td><td><div className="document-links">{[['ID', row.nationalIdDocument], ['License', row.licenseDocument], ['Vehicle', row.vehicleDocument]].map(([label, url]) => <a key={label} href={url} target="_blank" rel="noreferrer">{label}</a>)}</div></td><td className="amount">EGP {Number(row.user.wallet?.balance ?? 0).toFixed(0)}</td><td><Status value={row.status} /></td><td>{row.status === 'PENDING' ? <div className="inline-actions"><button className="mini-action approve" title="Approve captain" disabled={!editable || action.isPending} onClick={() => action.mutate({ id: row.user.id, decision: 'approve' })}><Check size={15} /></button><button className="mini-action reject" title="Reject captain" disabled={!editable || action.isPending} onClick={() => action.mutate({ id: row.user.id, decision: 'reject' })}><X size={15} /></button></div> : <button className="row-menu" aria-label="Captain actions"><MoreHorizontal size={18} /></button>}</td></tr>)}</tbody></table></div></section></>
+  const { data: captain, isLoading } = useQuery({
+    queryKey: ['captain', userId],
+    queryFn: () => api<Captain>(`/admin/captains/${userId}`),
+    enabled: editable && Boolean(userId),
+  })
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const [message, setMessage] = useState('')
+  const approve = useMutation({
+    mutationFn: () => api(`/admin/captains/${userId}/approve`, { method: 'POST' }),
+    onSuccess: () => { setMessage('Captain approved. The account is now active.'); cache.invalidateQueries({ queryKey: ['captain', userId] }); cache.invalidateQueries({ queryKey: ['captains'] }) },
+    onError: (error) => setMessage(error.message),
+  })
+  const reject = useMutation({
+    mutationFn: () => api(`/admin/captains/${userId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    onSuccess: () => { setRejectOpen(false); setReason(''); setMessage('Application rejected. The captain can see the reason and resubmit documents.'); cache.invalidateQueries({ queryKey: ['captain', userId] }); cache.invalidateQueries({ queryKey: ['captains'] }) },
+    onError: (error) => setMessage(error.message),
+  })
+  if (!editable) return <><Heading eyebrow="CAPTAIN REVIEW" title="Sign in required" description="Connect an administrator account from Settings to review applications." /></>
+  if (isLoading || !captain) return <><Heading eyebrow="CAPTAIN REVIEW" title={isLoading ? 'Loading…' : 'Application not found'} description={isLoading ? 'Fetching the captain application.' : 'This captain application does not exist.'} /></>
+  const missingDocs = captainDocFields.filter(([, , field]) => !captain[field as keyof Captain] || captain[field as keyof Captain] === 'PENDING_UPLOAD')
+  const canApprove = missingDocs.length === 0 && captain.status !== 'ACTIVE'
+  return <>
+    <Heading
+      eyebrow="CAPTAIN REVIEW"
+      title={captain.user.name}
+      description={`Application submitted ${new Date(captain.createdAt).toLocaleDateString()}`}
+      action={<div className="heading-actions"><Status value={captain.status} />
+        {captain.status === 'PENDING' || captain.status === 'REJECTED'
+          ? <div className="inline-actions">
+              <button className="button button-primary" disabled={!canApprove || approve.isPending} title={canApprove ? 'Approve captain' : 'Required documents are missing'} onClick={() => approve.mutate()}><Check size={15} /> Approve</button>
+              <button className="button button-outline" disabled={reject.isPending} onClick={() => { setRejectOpen(true); setMessage('') }}><X size={15} /> Reject</button>
+            </div>
+          : null}
+      </div>}
+    />
+    {message && <p className="form-message review-message">{message}</p>}
+    {captain.status === 'REJECTED' && captain.rejectionReason && <div className="review-warning"><strong>Rejection reason:</strong> {captain.rejectionReason}</div>}
+    <div className="review-layout">
+      <section className="panel settings-panel">
+        <div className="panel-heading"><div><div className="panel-kicker">APPLICANT</div><h2>Captain details</h2></div><span className="settings-icon"><ShieldCheck size={18} /></span></div>
+        <div className="detail-grid">
+          <DetailItem label="Full name" value={captain.user.name} />
+          <DetailItem label="Email" value={captain.user.email} />
+          <DetailItem label="Phone" value={captain.user.phone} />
+          <DetailItem label="National ID" value={captain.nationalIdLast4 ? `•••• ${captain.nationalIdLast4}` : null} />
+          <DetailItem label="Date of birth" value={captain.dateOfBirth ? new Date(captain.dateOfBirth).toLocaleDateString() : null} />
+          <DetailItem label="Governorate" value={captain.governorate} />
+          <DetailItem label="Driving license no." value={captain.licenseNumber} />
+          <DetailItem label="Vehicle registration no." value={captain.vehicleRegistrationNumber} />
+          <DetailItem label="Vehicle type" value={captain.vehicleType} />
+          <DetailItem label="Plate" value={captain.vehiclePlate} />
+          <DetailItem label="Make" value={captain.vehicleMake} />
+          <DetailItem label="Model" value={captain.vehicleModel} />
+          <DetailItem label="Color" value={captain.vehicleColor} />
+          <DetailItem label="Wallet" value={captain.user.wallet ? `EGP ${Number(captain.user.wallet.balance).toFixed(0)}` : null} />
+          <DetailItem label="Approved at" value={captain.approvedAt ? new Date(captain.approvedAt).toLocaleString() : null} />
+          <DetailItem label="Reviewed at" value={captain.reviewedAt ? new Date(captain.reviewedAt).toLocaleString() : null} />
+        </div>
+      </section>
+      <section className="panel settings-panel">
+        <div className="panel-heading"><div><div className="panel-kicker">DOCUMENTS</div><h2>{missingDocs.length === 0 ? 'All 7 documents uploaded' : `${missingDocs.length} of 7 documents missing`}</h2></div></div>
+        <div className="doc-grid">
+          {captainDocFields.map(([docType, label, field]) => (
+            <DocumentTile key={docType} userId={userId} docType={docType} label={label} uploaded={Boolean(captain[field as keyof Captain] && captain[field as keyof Captain] !== 'PENDING_UPLOAD')} />
+          ))}
+        </div>
+      </section>
+    </div>
+    {rejectOpen && <div className="modal-scrim" role="dialog" aria-modal="true">
+      <div className="modal-card">
+        <div className="panel-heading"><div><div className="panel-kicker">REJECT APPLICATION</div><h2>Why is this application rejected?</h2></div><button className="icon-button" aria-label="Close" onClick={() => setRejectOpen(false)}><X size={16} /></button></div>
+        <p className="settings-copy">The captain will see this reason and can update their documents and resubmit.</p>
+        <textarea className="reason-input" required minLength={3} rows={4} placeholder="e.g. The driving license image is unreadable" value={reason} onChange={(event) => setReason(event.target.value)} />
+        <div className="modal-actions">
+          <button className="button button-outline" onClick={() => setRejectOpen(false)}>Cancel</button>
+          <button className="button button-primary" disabled={reason.trim().length < 3 || reject.isPending} onClick={() => reject.mutate()}>{reject.isPending ? 'Rejecting…' : 'Reject application'}</button>
+        </div>
+      </div>
+    </div>}
+  </>
+}
+
+function CaptainsPage() {
+  const [filter, setFilter] = useState('PENDING')
+  const { data = [] } = useData<Captain[]>('captains', '/admin/captains', captainsDemo)
+  const [search, setSearch] = useState('')
+  const filtered = data.filter((row) => (filter === 'ALL' || row.status === filter) && `${row.user.name} ${row.user.email}`.toLowerCase().includes(search.toLowerCase()))
+  const pendingCount = data.filter((row) => row.status === 'PENDING').length
+  const filters = ['ALL', 'PENDING', 'ACTIVE', 'REJECTED', 'SUSPENDED']
+  return <><Heading eyebrow="FLEET MANAGEMENT" title="Captains" description="Review applications and manage your delivery fleet." action={<span className="pending-chip">{pendingCount} applications to review</span>} /><section className="panel table-panel">
+    <div className="table-toolbar"><label className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search captains" /></label><div className="filter-chips">{filters.map((value) => <button key={value} className={`chip ${filter === value ? 'chip-active' : ''}`} onClick={() => setFilter(value)}>{value === 'ALL' ? 'All' : value === 'ACTIVE' ? 'Approved' : value.charAt(0) + value.slice(1).toLowerCase()}</button>)}</div></div>
+    <div className="table-scroll"><table><thead><tr><th>CAPTAIN</th><th>VEHICLE</th><th>NATIONAL ID</th><th>WALLET</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}>
+      <td><div className="person-cell"><span className="person-avatar">{row.user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><strong>{row.user.name}</strong><small>{row.user.email}</small></span></div></td>
+      <td>{row.vehicleType ?? '—'}<small>{row.vehiclePlate ?? '—'}</small></td>
+      <td className="mono">{row.nationalIdLast4 ? `•••• ${row.nationalIdLast4}` : '—'}</td>
+      <td className="amount">EGP {Number(row.user.wallet?.balance ?? 0).toFixed(0)}</td>
+      <td><Status value={row.status} /></td>
+      <td><Link className="text-link" to={`/captains/${row.user.id}`}><Eye size={14} /> Review</Link></td>
+    </tr>)}</tbody></table></div>{filtered.length === 0 && <div className="empty-inline">No captains match this filter.</div>}</section></>
 }
 function ClientsPage() {
   const cache = useQueryClient()
@@ -151,5 +302,5 @@ function SettingsPage() {
 function LoginPage() { return <div className="login-shell"><span className="login-mark"><Boxes size={23} /></span><div className="eyebrow">WASALNY ORDERS</div><h1>Operations, in motion.</h1><p>Connect live order, captain, and pricing data from Settings.</p><Link to="/settings" className="button button-primary">Go to settings <ArrowRight size={16} /></Link></div> }
 
 export default function Dashboard() {
-  return <Routes><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<LoginPage />} /></Route></Routes>
+  return <Routes><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="captains/:userId" element={<CaptainReviewPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<LoginPage />} /></Route></Routes>
 }
