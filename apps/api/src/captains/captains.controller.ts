@@ -18,6 +18,7 @@ import { RedisService } from '../redis/redis.module';
 import { NationalIdCryptoService } from './national-id-crypto.service';
 import { validateEgyptianNationalId } from './national-id.util';
 import { CaptainProfileUpdateDto } from './captain-profile.dto';
+import { toPosixPath } from '../orders/proof-upload';
 
 class LocationDto {
   @IsNumber() @Min(-90) @Max(90) latitude: number;
@@ -78,7 +79,7 @@ export class CaptainsController {
     const field = documentFields[type as keyof typeof documentFields];
     if (!field || !file) throw new BadRequestException('Document type and file are required');
     const extension = file.mimetype === 'application/pdf' ? '.pdf' : file.mimetype === 'image/png' ? '.png' : '.jpg';
-    const relativePath = join('captains', user.id, `${randomUUID()}${extension}`);
+    const relativePath = toPosixPath(join('captains', user.id, `${randomUUID()}${extension}`));
     const absolutePath = join(process.cwd(), 'uploads', relativePath);
     await mkdir(dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, file.buffer);
@@ -95,11 +96,12 @@ export class CaptainsController {
       select: { [field]: true },
     });
     const storedPath = (profile as Record<string, string> | null)?.[field];
-    if (!storedPath || storedPath === 'PENDING_UPLOAD' || !storedPath.startsWith(`captains/${user.id}/`)) {
+    const normalizedPath = storedPath ? toPosixPath(storedPath) : storedPath;
+    if (!normalizedPath || normalizedPath === 'PENDING_UPLOAD' || !normalizedPath.startsWith(`captains/${user.id}/`)) {
       throw new BadRequestException('Document has not been uploaded');
     }
     const root = resolve(process.cwd(), 'uploads');
-    const path = resolve(root, storedPath);
+    const path = resolve(root, normalizedPath);
     if (!path.startsWith(`${root}/`) && !path.startsWith(`${root}\\`)) {
       throw new BadRequestException('Document not found');
     }

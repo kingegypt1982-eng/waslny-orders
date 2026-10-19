@@ -40,9 +40,14 @@ export function validateProofPhoto(file: ProofPhotoInput): { extension: string; 
   return kind;
 }
 
+/** Windows `path.join` stores backslashes. Normalize so stored paths and prefix checks stay portable. */
+export function toPosixPath(relativePath: string): string {
+  return relativePath.split('\\').join('/');
+}
+
 export async function saveProofPhoto(orderId: string, file: ProofPhotoInput) {
   const { extension, mimeType } = validateProofPhoto(file);
-  const relativePath = join(PROOF_ROOT, orderId, `${randomUUID()}${extension}`);
+  const relativePath = toPosixPath(join(PROOF_ROOT, orderId, `${randomUUID()}${extension}`));
   const absolutePath = join(process.cwd(), 'uploads', relativePath);
   await mkdir(dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, file.buffer);
@@ -52,7 +57,7 @@ export async function saveProofPhoto(orderId: string, file: ProofPhotoInput) {
 /** Same traversal-guard style as admin captain documents. Returns null when unsafe. */
 export function resolveUploadPath(relativePath: string) {
   const root = resolve(process.cwd(), 'uploads');
-  const path = resolve(root, relativePath);
+  const path = resolve(root, toPosixPath(relativePath));
   if (!path.startsWith(`${root}/`) && !path.startsWith(`${root}\\`)) return null;
   return { root, path };
 }

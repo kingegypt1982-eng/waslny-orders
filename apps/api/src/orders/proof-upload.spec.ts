@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { detectProofImage, validateProofPhoto } from './proof-upload';
+import { detectProofImage, toPosixPath, validateProofPhoto } from './proof-upload';
 
 describe('proof-upload validation', () => {
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
@@ -21,5 +21,11 @@ describe('proof-upload validation', () => {
   it('rejects oversized and empty photos', () => {
     expect(() => validateProofPhoto({ buffer: png, size: 5 * 1024 * 1024 + 1 })).toThrow(BadRequestException);
     expect(() => validateProofPhoto({ buffer: Buffer.alloc(0), size: 0 })).toThrow(BadRequestException);
+  });
+
+  it('stores and compares upload paths with forward slashes on every platform', () => {
+    expect(toPosixPath('captains\\u1\\a.jpg')).toBe('captains/u1/a.jpg');
+    expect(toPosixPath('proofs/o1/a.webp')).toBe('proofs/o1/a.webp');
+    expect(toPosixPath('captains\\u1/../u2/a.jpg')).toBe('captains/u1/../u2/a.jpg');
   });
 });

@@ -517,6 +517,27 @@ describe('OrdersService wallet rules', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('serves proof photos stored with Windows separators', async () => {
+    prisma.order.findUnique.mockResolvedValue({ ...acceptedOrder, client: {}, captain: {} });
+    prisma.orderProof.findUnique.mockResolvedValue({
+      id: 'p1', orderId: 'o1', type: 'PICKUP', photoPath: 'proofs\\o1\\x.jpg',
+    });
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    const file = await service.proofPhotoForUser('o1', 'p1', { id: 'cap1', role: 'CAPTAIN' as any });
+    expect(file.path.endsWith('x.jpg')).toBe(true);
+    expect(file.mimeType).toBe('image/jpeg');
+  });
+
+  it('serves invoice photos stored with Windows separators', async () => {
+    prisma.order.findUnique.mockResolvedValue({ ...invoiceOrder, client: {}, captain: {} });
+    prisma.purchaseInvoice.findUnique.mockResolvedValue({ photoPath: 'proofs\\o1\\inv.png' });
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    const file = await service.invoicePhotoForUser('o1', { id: 'client1', role: 'CLIENT' as any });
+    expect(file.mimeType).toBe('image/png');
+  });
+
   const invoiceOrder = {
     id: 'o1', clientId: 'client1', captainId: 'cap1', status: 'PICKED_UP',
     category: ShipmentCategory.PURCHASES, estimatedBudget: 250,

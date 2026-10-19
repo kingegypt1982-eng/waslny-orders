@@ -1,4 +1,5 @@
-import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import * as fs from 'fs';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -335,5 +336,38 @@ describe('AdminService', () => {
 
     expect(invoice).toMatchObject({ id: 'invoice1', hasPhoto: true });
     expect(invoice).not.toHaveProperty('photoPath');
+  });
+
+  describe('document and photo serving', () => {
+    it('serves a captain document stored with Windows separators', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ nationalIdDocument: 'captains\\u1\\a.jpg' });
+      jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+      const file = await service.captainDocument('u1', 'identity');
+
+      expect(file.path.endsWith('a.jpg')).toBe(true);
+      expect(file.mimeType).toBe('image/jpeg');
+    });
+
+    it('rejects another captain document path', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ nationalIdDocument: 'captains\\someone-else\\a.jpg' });
+
+      await expect(service.captainDocument('u1', 'identity')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects un-uploaded captain documents', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ nationalIdDocument: 'PENDING_UPLOAD' });
+
+      await expect(service.captainDocument('u1', 'identity')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('serves invoice photos stored with Windows separators', async () => {
+      prisma.purchaseInvoice.findUnique.mockResolvedValue({ photoPath: 'proofs\\o1\\inv.png' });
+      jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+      const file = await service.orderInvoicePhoto('o1');
+
+      expect(file.mimeType).toBe('image/png');
+    });
   });
 });

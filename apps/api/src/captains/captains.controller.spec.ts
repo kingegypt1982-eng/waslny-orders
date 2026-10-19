@@ -197,6 +197,33 @@ describe('CaptainsController profile', () => {
     expect(stream).toBeDefined();
   });
 
+  it('stores uploaded paths with forward slashes even where path.join uses backslashes', async () => {
+    prisma.captainProfile.update.mockResolvedValue({});
+    const file = { mimetype: 'image/jpeg', buffer: Buffer.from('x') } as any;
+
+    await controller.uploadDocument({ id: 'u1' }, 'identity', file);
+
+    const stored = prisma.captainProfile.update.mock.calls[0][0].data.nationalIdDocument;
+    expect(stored).toMatch(/^captains\/u1\/.+\.jpg$/);
+  });
+
+  it('serves documents stored under Windows backslash separators', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({
+      profilePhotoDocument: 'captains\\u1\\photo.jpg',
+    });
+    const stream = await controller.myDocument({ id: 'u1' }, 'profile-photo');
+    expect(stream).toBeDefined();
+  });
+
+  it('rejects documents stored under another captain', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({
+      profilePhotoDocument: 'captains\\someone-else\\photo.jpg',
+    });
+    await expect(
+      controller.myDocument({ id: 'u1' }, 'profile-photo'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('GET /me/documents/:type rejects un-uploaded documents', async () => {
     prisma.captainProfile.findUnique.mockResolvedValue({
       profilePhotoDocument: 'PENDING_UPLOAD',

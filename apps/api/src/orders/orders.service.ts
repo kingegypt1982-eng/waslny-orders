@@ -11,7 +11,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
 import { RespondInvoiceDto } from './dto/respond-invoice.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
-import { ProofPhotoInput, resolveUploadPath, saveProofPhoto } from './proof-upload';
+import { ProofPhotoInput, resolveUploadPath, saveProofPhoto, toPosixPath } from './proof-upload';
 
 const radians = (degrees: number) => degrees * Math.PI / 180;
 
@@ -412,10 +412,11 @@ export class OrdersService {
   async invoicePhotoForUser(orderId: string, user: { id: string; role: UserRole }) {
     await this.getForUser(orderId, user);
     const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { orderId }, select: { photoPath: true } });
-    if (!invoice?.photoPath || !invoice.photoPath.startsWith('proofs/')) throw new NotFoundException('Invoice photo not found');
-    const resolved = resolveUploadPath(invoice.photoPath);
+    const photoPath = invoice?.photoPath ? toPosixPath(invoice.photoPath) : '';
+    if (!photoPath.startsWith('proofs/')) throw new NotFoundException('Invoice photo not found');
+    const resolved = resolveUploadPath(photoPath);
     if (!resolved || !existsSync(resolved.path)) throw new NotFoundException('Invoice photo is missing');
-    const mimeType = invoice.photoPath.endsWith('.png') ? 'image/png' : invoice.photoPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    const mimeType = photoPath.endsWith('.png') ? 'image/png' : photoPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
     return { path: resolved.path, mimeType };
   }
 
@@ -585,14 +586,15 @@ export class OrdersService {
   async proofPhotoForUser(orderId: string, proofId: string, user: { id: string; role: UserRole }) {
     await this.getForUser(orderId, user);
     const proof = await this.prisma.orderProof.findUnique({ where: { id: proofId } });
-    if (!proof || proof.orderId !== orderId || !proof.photoPath || !proof.photoPath.startsWith('proofs/')) {
+    const photoPath = proof?.photoPath ? toPosixPath(proof.photoPath) : '';
+    if (!proof || proof.orderId !== orderId || !photoPath.startsWith('proofs/')) {
       throw new NotFoundException('Proof photo not found');
     }
-    const resolved = resolveUploadPath(proof.photoPath);
+    const resolved = resolveUploadPath(photoPath);
     if (!resolved || !existsSync(resolved.path)) throw new NotFoundException('Proof photo is missing');
-    const mimeType = proof.photoPath.endsWith('.png')
+    const mimeType = photoPath.endsWith('.png')
       ? 'image/png'
-      : proof.photoPath.endsWith('.webp')
+      : photoPath.endsWith('.webp')
         ? 'image/webp'
         : 'image/jpeg';
     return { path: resolved.path, mimeType };

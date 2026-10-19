@@ -12,7 +12,7 @@ import { AdminTransactionsQueryDto } from './dto/admin-transactions-query.dto';
 import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { AdminTopUpsQueryDto } from '../topups/dto/admin-topups-query.dto';
 import { AdminAcknowledgementsQueryDto } from './dto/admin-acknowledgements-query.dto';
-import { resolveUploadPath } from '../orders/proof-upload';
+import { resolveUploadPath, toPosixPath } from '../orders/proof-upload';
 import { NationalIdCryptoService } from '../captains/national-id-crypto.service';
 
 @Injectable()
@@ -187,10 +187,11 @@ export class AdminService {
 
   async orderInvoicePhoto(orderId: string) {
     const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { orderId }, select: { photoPath: true } });
-    if (!invoice?.photoPath || !invoice.photoPath.startsWith('proofs/')) throw new NotFoundException('Invoice photo not found');
-    const resolved = resolveUploadPath(invoice.photoPath);
+    const photoPath = invoice?.photoPath ? toPosixPath(invoice.photoPath) : '';
+    if (!photoPath.startsWith('proofs/')) throw new NotFoundException('Invoice photo not found');
+    const resolved = resolveUploadPath(photoPath);
     if (!resolved || !existsSync(resolved.path)) throw new NotFoundException('Invoice photo is missing');
-    const mimeType = invoice.photoPath.endsWith('.png') ? 'image/png' : invoice.photoPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    const mimeType = photoPath.endsWith('.png') ? 'image/png' : photoPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
     return { path: resolved.path, mimeType };
   }
 
@@ -207,7 +208,7 @@ export class AdminService {
     const field = fields[type as keyof typeof fields];
     if (!field) throw new NotFoundException('Document not found');
     const profile = await this.prisma.captainProfile.findUnique({ where: { userId } });
-    const storedPath = profile?.[field];
+    const storedPath = profile?.[field] ? toPosixPath(profile[field]) : undefined;
     if (!storedPath || storedPath === 'PENDING_UPLOAD' || !storedPath.startsWith(`captains/${userId}/`)) {
       throw new NotFoundException('Document has not been uploaded');
     }
