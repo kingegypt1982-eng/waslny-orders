@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:dio/dio.dart';
 
 import '../core/api_client.dart';
+import '../core/json_utils.dart';
 
 const _reviewGreen = Color(0xFF19785F);
 const _reviewInk = Color(0xFF23362C);
@@ -142,10 +143,8 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
     _ => 'شحنة',
   };
 
-  String _amount(Object? value) {
-    final number = value is num ? value : num.tryParse(value?.toString() ?? '');
-    return number?.toStringAsFixed(2) ?? '--';
-  }
+  String _amount(Object? value) =>
+      asDoubleOrNull(value)?.toStringAsFixed(2) ?? '--';
 
   String _arCurrency(Object? currency) =>
       currency?.toString() == 'EGP' ? 'ج.م' : '${currency ?? ''}';
@@ -195,7 +194,8 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
                 children: [
                   _ReviewRow(
                     label: 'المسافة',
-                    value: '${widget.quote['distanceKm'] ?? '—'} كم',
+                    value:
+                        '${asDoubleOrNull(widget.quote['distanceKm'])?.toStringAsFixed(1) ?? '—'} كم',
                     icon: Icons.route_outlined,
                   ),
                   const Divider(height: 24),

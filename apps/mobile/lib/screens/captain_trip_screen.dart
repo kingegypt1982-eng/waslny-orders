@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api_client.dart';
+import '../core/json_utils.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -276,6 +277,7 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   }
 
   Widget _routeCard() {
+    final distance = asDoubleOrNull(_order['distanceKm']);
     return _card(
       title: 'تفاصيل الشحنة',
       child: Column(
@@ -291,7 +293,10 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
           const SizedBox(height: 6),
           _infoRow('هاتف المستلم', _order['recipientPhone'] as String? ?? '-'),
           const SizedBox(height: 6),
-          _infoRow('المسافة', '${_order['distanceKm'] ?? '-'} كم'),
+          _infoRow(
+            'المسافة',
+            distance == null ? '-' : '${distance.toStringAsFixed(1)} كم',
+          ),
           const SizedBox(height: 6),
           _infoRow('نوع الشحنة', _categoryLabel(_order['category'] as String?)),
         ],
@@ -300,8 +305,8 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   }
 
   Widget _summaryCard() {
-    final price = _toDouble(_order['price']);
-    final commission = _toDouble(_order['commission']);
+    final price = asDouble(_order['price']);
+    final commission = asDouble(_order['commission']);
     final completed = _status == 'COMPLETED';
     return _card(
       title: completed ? 'ملخص الرحلة والأرباح' : 'ملخص الأرباح المتوقعة',
@@ -496,11 +501,6 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   }
 
   String _proofLabel(String type) => type == 'PICKUP' ? 'صورة الاستلام' : 'صورة التسليم';
-
-  double _toDouble(Object? value) {
-    if (value is num) return value.toDouble();
-    return double.tryParse('$value') ?? 0;
-  }
 
   String _egp(double value) {
     final rounded = value == value.roundToDouble()

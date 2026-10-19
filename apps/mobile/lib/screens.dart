@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
 import 'core/google_auth.dart';
+import 'core/json_utils.dart';
 import 'screens/forgot_password.dart';
 import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
@@ -768,8 +769,8 @@ class CaptainHome extends ConsumerWidget {
                     );
                     if (result == null || !context.mounted) return;
                     final point = LatLng(
-                      result['lat'] as double,
-                      result['lon'] as double,
+                      asDouble(result['lat']),
+                      asDouble(result['lon']),
                     );
                     ref.read(captainLocationProvider.notifier).state = point;
                     try {
@@ -2332,7 +2333,7 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
       '/map-picker?title=${Uri.encodeComponent(title)}',
     );
     if (result == null || !mounted) return;
-    final point = LatLng(result['lat'] as double, result['lon'] as double);
+    final point = LatLng(asDouble(result['lat']), asDouble(result['lon']));
     setState(() {
       if (pickup) {
         _pickup = point;
@@ -2807,7 +2808,7 @@ class WalletScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 7),
                   Text(
-                    'EGP ${wallet['balance'] ?? '0.00'}',
+                    'EGP ${asDouble(wallet['balance']).toStringAsFixed(2)}',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 29,
@@ -2850,7 +2851,7 @@ class _TransactionRow extends StatelessWidget {
   final Map<String, dynamic> data;
   @override
   Widget build(BuildContext context) {
-    final amount = double.tryParse('${data['amount']}') ?? 0;
+    final amount = asDouble(data['amount']);
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: CircleAvatar(
@@ -3027,10 +3028,7 @@ class _MoneyRow extends StatelessWidget {
   );
 }
 
-double _toDouble(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse(value?.toString() ?? '') ?? 0;
-}
+double _toDouble(Object? value) => asDouble(value);
 
 String _egp(Object? value) => 'EGP ${_toDouble(value).toStringAsFixed(2)}';
 

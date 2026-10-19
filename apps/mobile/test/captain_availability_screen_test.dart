@@ -96,11 +96,12 @@ Map<String, dynamic> _order({required String id, required double distance}) => {
   'reference': 'DEMO-1',
   'category': 'PACKAGE',
   'status': 'SEARCHING_CAPTAIN',
-  'price': 50,
-  'commission': 10,
+  // Prisma Decimal columns arrive as JSON strings.
+  'price': '50.00',
+  'commission': '10.00',
   'pickupLabel': 'نقطة الاستلام',
   'deliveryLabel': 'نقطة التسليم',
-  'distanceToPickupKm': distance,
+  'distanceToPickupKm': distance.toString(),
 };
 
 Future<void> _pumpAvailability(WidgetTester tester, _FakeApi api) async {

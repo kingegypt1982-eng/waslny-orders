@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api_client.dart';
+import '../core/json_utils.dart';
 import '../screens.dart' show availableOrdersProvider, captainLocationProvider;
 
 const _green = Color(0xFF19785F);
@@ -78,12 +79,11 @@ class _CaptainAvailabilityScreenState
       setState(() {
         _loading = false;
         _error = null;
-        _isOnline = profile['isOnline'] as bool? ?? false;
-        _radiusKm =
-            (profile['serviceRadiusKm'] as num?)?.toDouble() ?? _radiusKm;
+        _isOnline = asBool(profile['isOnline']);
+        _radiusKm = asDouble(profile['serviceRadiusKm'], fallback: _radiusKm);
         if (band is Map) {
-          _minRadius = (band['min'] as num?)?.toDouble() ?? _minRadius;
-          _maxRadius = (band['max'] as num?)?.toDouble() ?? _maxRadius;
+          _minRadius = asDouble(band['min'], fallback: _minRadius);
+          _maxRadius = asDouble(band['max'], fallback: _maxRadius);
         }
         _orders = orders;
       });
@@ -326,9 +326,9 @@ class _CaptainAvailabilityScreenState
   Widget _orderCard(Map<String, dynamic> order) {
     final id = order['id'] as String;
     final busy = _busyOrders.contains(id);
-    final distance = (order['distanceToPickupKm'] as num?)?.toDouble();
-    final price = (order['price'] as num?)?.toDouble() ?? 0;
-    final commission = (order['commission'] as num?)?.toDouble() ?? 0;
+    final distance = asDoubleOrNull(order['distanceToPickupKm']);
+    final price = asDouble(order['price']);
+    final commission = asDouble(order['commission']);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(15),

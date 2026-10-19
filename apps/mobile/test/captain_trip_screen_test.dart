@@ -54,8 +54,10 @@ void main() {
 
     expect(find.text('ملخص الأرباح المتوقعة'), findsOneWidget);
     expect(find.text('صافي ربحك'), findsOneWidget);
-    expect(find.text('EGP 40'), findsOneWidget);
-    expect(find.text('EGP 50'), findsOneWidget);
+    expect(find.text('EGP 39.44'), findsOneWidget);
+    expect(find.text('- EGP 3.94'), findsOneWidget);
+    expect(find.text('EGP 35.50'), findsOneWidget);
+    expect(find.text('3.4 كم'), findsOneWidget);
     expect(
       find.text(
         'في انتظار تأكيد العميل لاستلام الشحنة لإكمال الطلب وتحويل الأرباح.',
@@ -123,9 +125,10 @@ Map<String, dynamic> _order(String status) => {
   'reference': 'DEMO-1',
   'status': status,
   'category': 'PACKAGE',
-  'price': 50,
-  'commission': 10,
-  'distanceKm': 3.4,
+  // Prisma Decimal columns arrive as JSON strings.
+  'price': '39.44',
+  'commission': '3.94',
+  'distanceKm': '3.4',
   'pickupLabel': 'نقطة الاستلام',
   'deliveryLabel': 'نقطة التسليم',
   'recipientName': 'أحمد',

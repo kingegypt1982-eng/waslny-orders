@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api_client.dart';
+import '../core/json_utils.dart';
 import 'tracking_screen.dart' show trackStatusAr;
 
 const _hBg = Color(0xFF03151D);
@@ -333,10 +334,7 @@ class _HOrderCard extends StatelessWidget {
 
 String _hEgp(Object? value) {
   if (value == null) return '—';
-  final number = value is num
-      ? value.toDouble()
-      : double.tryParse('$value') ?? 0;
-  return '${number.toStringAsFixed(2)} ج.م';
+  return '${asDouble(value).toStringAsFixed(2)} ج.م';
 }
 
 String _hDate(Object? value) {

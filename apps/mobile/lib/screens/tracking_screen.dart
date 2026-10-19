@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../core/api_client.dart';
+import '../core/json_utils.dart';
 
 /// Dark premium RTL tracking screen for Waslny Orders.
 ///
@@ -966,16 +967,13 @@ Map<String, dynamic>? _trackCaptain(Map<String, dynamic> order) {
 }
 
 LatLng? _tLatLng(Object? lat, Object? lon) {
-  final la = lat is num ? lat.toDouble() : double.tryParse('${lat ?? ''}');
-  final lo = lon is num ? lon.toDouble() : double.tryParse('${lon ?? ''}');
+  final la = asDoubleOrNull(lat);
+  final lo = asDoubleOrNull(lon);
   if (la == null || lo == null) return null;
   return LatLng(la, lo);
 }
 
-double _tNum(Object? value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse('${value ?? ''}') ?? 0;
-}
+double _tNum(Object? value) => asDouble(value);
 
 String _tEgp(Object? value) => '${_tNum(value).toStringAsFixed(2)} ج.م';
 
