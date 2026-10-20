@@ -249,6 +249,10 @@ void main() {
   });
 
   testWidgets('client registration routes to the home screen', (tester) async {
+    // The bottom navigation follows the device language; pin Arabic so the
+    // labels under test are the ones shown.
+    tester.platformDispatcher.localeTestValue = const Locale('ar');
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
     SharedPreferences.setMockInitialValues({});
     final preferences = await SharedPreferences.getInstance();
     final api = _TestApiClient(preferences, role: 'CLIENT');

@@ -18,6 +18,14 @@ import { AdminTopUpsQueryDto } from './dto/admin-topups-query.dto';
 const TOPUP_EXPIRY_MINUTES = 60;
 
 /**
+ * A still-PENDING top-up for the same captain and net amount created within
+ * this window is reused instead of creating a second row (and a second
+ * Kashier session). This is the server-side guard against rapid double taps
+ * and client retries; the Kashier order reference stays globally unique.
+ */
+const TOPUP_REUSE_WINDOW_MINUTES = 3;
+
+/**
  * Kashier money unit: MAJOR units as decimals (e.g. webhook `amount: 50`
  * means 50.00 EGP), proven by a live reconciliation lookup of a real
  * sandbox payment (order amount 50 / pay-transaction amount 50, both EGP).
@@ -90,6 +98,28 @@ export class TopUpsService {
     // the history of an existing TopUp — the webhook compares and credits
     // strictly from these stored values.
     const quote = computeTopUpCharge(amount, pricing.paymentFeePercent, pricing.paymentFeeFixed);
+    // Server-side idempotency: if this captain already has a recent PENDING
+    // top-up for the same net amount with a live checkout URL, hand it back
+    // instead of creating a duplicate row and a duplicate Kashier session.
+    const reusable = await this.prisma.topUp.findFirst({
+      where: {
+        userId,
+        status: TopUpStatus.PENDING,
+        creditAmount: quote.credit,
+        checkoutUrl: { not: null },
+        createdAt: { gt: new Date(Date.now() - TOPUP_REUSE_WINDOW_MINUTES * 60_000) },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (reusable) {
+      return {
+        topUpId: reusable.id,
+        checkoutUrl: reusable.checkoutUrl as string,
+        creditAmount: reusable.creditAmount.toNumber(),
+        chargeAmount: reusable.chargeAmount.toNumber(),
+        feeAmount: reusable.feeAmount.toNumber(),
+      };
+    }
     // Unstructured, unguessable merchant reference (Kashier rejects duplicates).
     const providerOrderRef = `topup_${randomUUID().replace(/-/g, '')}`;
     const topUp = await this.prisma.topUp.create({
@@ -120,6 +150,7 @@ export class TopUpsService {
         data: { providerSessionId: session.sessionId, checkoutUrl: session.checkoutUrl },
       });
       return {
+        topUpId: topUp.id,
         checkoutUrl: session.checkoutUrl,
         creditAmount: quote.credit.toNumber(),
         chargeAmount: quote.charge.toNumber(),

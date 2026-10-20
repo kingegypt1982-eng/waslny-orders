@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +12,7 @@ import 'package:latlong2/latlong.dart';
 import '../core/api_client.dart';
 import '../core/json_utils.dart';
 import '../core/location_service.dart';
+import '../core/texts.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -19,8 +21,13 @@ const _line = Color(0xFFE8ECE7);
 const _danger = Color(0xFFD9534F);
 const _surface = Color(0xFFF7F8F5);
 
-/// How long a single offer card stays on screen before it is dropped and the
-/// order is marked as passed for this captain (inDrive-style countdown).
+/// How long a single offer card stays on screen before it is hidden locally
+/// and the list is refreshed (inDrive-style countdown).
+///
+/// The window is purely a client-side convenience: it is NOT a server offer
+/// deadline. The backend only expires an unassigned search globally
+/// (`ORDER_SEARCH_EXPIRY_MINUTES`, 15 min from `createdAt`) and has no
+/// per-captain offer timer, so running out of time here never calls the API.
 const kOfferCountdownSeconds = 30;
 
 /// The order feed is refreshed from the server on this cadence.
@@ -71,8 +78,9 @@ class CaptainAvailabilityScreen extends StatelessWidget {
 ///   radius circle and the pickups of the live offers,
 /// * a draggable sheet of offer cards: price, distance, net earnings, a
 ///   countdown bar, accept and skip. New requests slide in at the top,
-///   accepted / skipped / expired requests slide out, and the order is
-///   passed server-side so it does not come back.
+///   accepted / skipped requests slide out. When a card's countdown ends it
+///   is hidden locally only (no server call); the feed is re-fetched from the
+///   server whenever the app returns to the foreground.
 class CaptainAvailabilityView extends ConsumerStatefulWidget {
   const CaptainAvailabilityView({
     super.key,
@@ -92,7 +100,8 @@ class CaptainAvailabilityView extends ConsumerStatefulWidget {
 }
 
 class _CaptainAvailabilityViewState
-    extends ConsumerState<CaptainAvailabilityView> {
+    extends ConsumerState<CaptainAvailabilityView>
+    with WidgetsBindingObserver {
   final _listKey = GlobalKey<AnimatedListState>();
   final _sheetController = DraggableScrollableController();
   final _mapController = MapController();
@@ -122,6 +131,7 @@ class _CaptainAvailabilityViewState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _point = ref.read(captainLocationProvider);
     _locate(post: true);
     _pollTimer = Timer.periodic(widget.pollInterval, (_) {
@@ -134,10 +144,18 @@ class _CaptainAvailabilityViewState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
     _sheetController.dispose();
     super.dispose();
+  }
+
+  /// Coming back from the background re-fetches the feed so offers that
+  /// expired while we were away are dropped and new ones appear.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh(silent: true);
   }
 
   /// Resolves the device position; on success it also becomes the captain's
@@ -336,11 +354,30 @@ class _CaptainAvailabilityViewState
       context.push('/captain/trip/$id');
     } catch (error) {
       if (!mounted) return;
-      _toast(ApiClient.errorMessage(error));
+      if (_isOrderTaken(error)) {
+        // Someone else won the race: drop the card locally and re-sync.
+        _dismiss(
+          order,
+          notifyServer: false,
+          toast: 'عذرًا، لم يعد هذا الطلب متاحًا — تم قبوله من مندوب آخر.',
+        );
+      } else {
+        _toast(ApiClient.errorMessage(error));
+      }
       await _refresh(silent: true);
     } finally {
       if (mounted) setState(() => _busy.remove(id));
     }
+  }
+
+  /// True when the server refused the accept because the order is gone
+  /// (409) or its message says it is no longer available.
+  bool _isOrderTaken(Object error) {
+    if (error is! DioException) return false;
+    if (error.response?.statusCode == 409) return true;
+    final data = error.response?.data;
+    final message = data is Map ? '${data['message'] ?? ''}' : '';
+    return message.toLowerCase().contains('no longer available');
   }
 
   Future<void> _save({bool? online, double? radiusKm}) async {
@@ -864,7 +901,7 @@ class _CaptainAvailabilityViewState
             onSkip: () =>
                 _dismiss(order, notifyServer: true, toast: 'تم تخطي الطلب'),
             onExpired: () =>
-                _dismiss(order, notifyServer: true, toast: 'انتهى وقت هذا الطلب'),
+                _dismiss(order, notifyServer: false, toast: 'انتهى وقت هذا الطلب'),
           ),
         ),
       ),
@@ -1053,7 +1090,7 @@ class _OfferCardState extends State<_OfferCard> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '${order['category'] ?? 'SHIPMENT'} · '
+                        '${categoryLabel(order['category'])} · '
                         '${order['reference'] ?? ''}',
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
@@ -1093,6 +1130,9 @@ class _OfferCardState extends State<_OfferCard> {
                   order['deliveryLabel'] as String? ?? '',
                 ),
                 const SizedBox(height: 10),
+                // The API only returns `price` and `commission` for an offer;
+                // there is no captain net-earnings field yet, so the net is
+                // derived here as price - commission.
                 Text(
                   'صافي ربحك: ${_money(price - commission)}',
                   style: const TextStyle(

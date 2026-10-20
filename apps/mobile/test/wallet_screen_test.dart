@@ -103,15 +103,201 @@ void main() {
     );
     expect(find.text('Top-up summary'), findsNothing);
   });
+
+  testWidgets('a double tap cannot create two top-ups', (tester) async {
+    final api = _WalletApi(await _preferences());
+    await tester.pumpWidget(_app(api));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('Add funds'));
+    await tester.pump();
+    // The button is disabled the moment a top-up is being created.
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'Add funds'),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '95');
+    await tester.tap(find.text('Continue'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(api.postCount, 1);
+  });
+
+  testWidgets('a slow confirmation reassures the captain instead of failing', (
+    tester,
+  ) async {
+    final api = _WalletApi(await _preferences());
+    await tester.pumpWidget(
+      _app(
+        api,
+        pollInterval: const Duration(seconds: 1),
+        maxPolls: 1,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('Add funds'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '95');
+    await tester.tap(find.text('Continue'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    await tester.tap(find.text('Pay now'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Let the (short) poll budget run out while the top-up stays PENDING.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(find.textContaining('still being confirmed'), findsOneWidget);
+    expect(find.text('Wallet topped up successfully.'), findsNothing);
+    expect(find.textContaining('failed'), findsNothing);
+    expect(find.textContaining('expired'), findsNothing);
+  });
+
+  testWidgets('the wallet is fully Arabic on an Arabic device', (tester) async {
+    tester.platformDispatcher.localeTestValue = const Locale('ar');
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    final api = _WalletApi(await _preferences());
+    await tester.pumpWidget(_app(api));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('محفظة المندوب'), findsOneWidget);
+    expect(find.text('الرصيد المتاح'), findsOneWidget);
+    expect(find.text('ج.م 39.44'), findsOneWidget);
+    expect(find.text('شحن الرصيد'), findsOneWidget);
+    expect(find.text('المعاملات'), findsOneWidget);
+    expect(find.text('شحن رصيد'), findsOneWidget); // transaction type
+    expect(find.text('ج.م 10.00'), findsOneWidget); // transaction amount
+    // No English leaks through.
+    expect(find.text('EGP 39.44'), findsNothing);
+    expect(find.text('Captain wallet'), findsNothing);
+  });
+
+  testWidgets('the top-up summary is Arabic on an Arabic device', (
+    tester,
+  ) async {
+    tester.platformDispatcher.localeTestValue = const Locale('ar');
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    final api = _WalletApi(await _preferences());
+    await tester.pumpWidget(_app(api));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('شحن الرصيد'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '95');
+    await tester.tap(find.text('متابعة'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(find.text('ملخص الشحن'), findsOneWidget);
+    expect(find.text('رصيد المحفظة'), findsOneWidget);
+    expect(find.text('رسوم الخدمة'), findsOneWidget);
+    expect(find.text('الإجمالي المطلوب'), findsOneWidget);
+    expect(find.text('ج.م 95.00'), findsOneWidget);
+    expect(find.text('ج.م 100.00'), findsOneWidget);
+
+    await tester.tap(find.text('ادفع الآن'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(find.text('في انتظار تأكيد شحن 95.00…'), findsOneWidget);
+    expect(find.text('تحقق الآن'), findsOneWidget);
+    expect(find.text('افتح صفحة الدفع'), findsOneWidget);
+  });
+
+  testWidgets('the pending banner can reopen the checkout page manually', (
+    tester,
+  ) async {
+    final api = _WalletApi(await _preferences());
+    final opened = <Uri>[];
+    await tester.pumpWidget(
+      _app(
+        api,
+        onOpen: (uri) async {
+          opened.add(uri);
+          return true;
+        },
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('Add funds'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '95');
+    await tester.tap(find.text('Continue'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    await tester.tap(find.text('Pay now'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // The automatic launch happens once, right after the sheet is confirmed.
+    expect(opened, hasLength(1));
+    expect(find.text('Open payment page'), findsOneWidget);
+
+    // A manual tap (never blocked by pop-up blockers) reopens the same URL.
+    await tester.tap(find.text('Open payment page'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(opened, hasLength(2));
+    expect(opened.last.toString(), 'https://pay.kashier.io/session/tu1');
+  });
 }
 
-Widget _app(_WalletApi api, {Future<bool> Function(Uri)? onOpen}) => ProviderScope(
+Widget _app(
+  _WalletApi api, {
+  Future<bool> Function(Uri)? onOpen,
+  Duration pollInterval = const Duration(seconds: 4),
+  int maxPolls = 45,
+}) => ProviderScope(
   overrides: [
     preferencesProvider.overrideWithValue(api.preferences),
     apiClientProvider.overrideWithValue(api),
     urlOpenerProvider.overrideWithValue(onOpen ?? (_) async => true),
   ],
-  child: const MaterialApp(home: WalletScreen()),
+  child: MaterialApp(
+    home: WalletScreen(pollInterval: pollInterval, maxPolls: maxPolls),
+  ),
 );
 
 Future<SharedPreferences> _preferences() async {
@@ -125,6 +311,7 @@ class _WalletApi extends ApiClient {
   _WalletApi(super.preferences);
 
   double? postedAmount;
+  int postCount = 0;
   bool postError = false;
   String status = 'PENDING';
   String balance = '39.44';
@@ -161,10 +348,10 @@ class _WalletApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    // The top-up id must come from the create response; this endpoint is only
+    // a fallback for older servers and must not be needed here.
     if (path == '/wallet/topups') {
-      return [
-        {'id': 'tu1', 'status': 'PENDING'},
-      ];
+      throw UnimplementedError('getList $path should not be called');
     }
     throw UnimplementedError('getList $path');
   }
@@ -183,7 +370,9 @@ class _WalletApi extends ApiClient {
         );
       }
       postedAmount = (data as Map)['amount'] as double?;
+      postCount += 1;
       return {
+        'topUpId': 'tu1',
         'checkoutUrl': 'https://pay.kashier.io/session/tu1',
         'creditAmount': 95.0,
         'chargeAmount': 100.0,

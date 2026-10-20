@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
 import 'core/google_auth.dart';
 import 'core/json_utils.dart';
+import 'core/texts.dart';
 import 'core/url_opener.dart';
 import 'screens/captain_availability_screen.dart';
 import 'screens/forgot_password.dart';
@@ -512,9 +513,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             const HistoryScreen(),
             const ProfileScreen(),
           ];
-    final labels = captain
-        ? const ['Deliver', 'Trips', 'Wallet', 'Profile']
-        : const ['الرئيسية', 'طلباتي', 'الملف'];
+    final labels = homeTabLabels(captain: captain);
+    final arabic = deviceIsArabic();
     final icons = captain
         ? const [
             Icons.route_outlined,
@@ -530,7 +530,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     return Scaffold(
       body: IndexedStack(index: _index, children: views),
       bottomNavigationBar: Directionality(
-        textDirection: captain ? TextDirection.ltr : TextDirection.rtl,
+        textDirection: arabic ? TextDirection.rtl : TextDirection.ltr,
         child: NavigationBar(
           backgroundColor: captain ? null : const Color(0xFF041920),
           indicatorColor: captain ? null : const Color(0xFF103D3B),
@@ -2543,77 +2543,118 @@ class _OrderCard extends StatelessWidget {
 }
 
 class WalletScreen extends ConsumerStatefulWidget {
-  const WalletScreen({super.key});
+  const WalletScreen({
+    super.key,
+    this.pollInterval = const Duration(seconds: 4),
+    this.maxPolls = 45,
+  });
+
+  /// How often the screen re-checks a PENDING top-up, and after how many
+  /// checks it stops (the payment may still settle afterwards — the balance
+  /// simply refreshes next time the screen loads or the app resumes).
+  final Duration pollInterval;
+  final int maxPolls;
+
   @override
   ConsumerState<WalletScreen> createState() => _WalletScreenState();
 }
 
-class _WalletScreenState extends ConsumerState<WalletScreen> {
-  /// Payment confirmation arrives from the Kashier webhook, not the app, so the
-  /// screen polls until the top-up leaves PENDING.
-  static const _pollInterval = Duration(seconds: 4);
-  static const _maxPolls = 45; // ~3 minutes before giving up.
-
+class _WalletScreenState extends ConsumerState<WalletScreen>
+    with WidgetsBindingObserver {
   late Future<Map<String, dynamic>> _wallet;
   Timer? _poll;
   int _polls = 0;
   String? _pendingTopUpId;
   String? _pendingCredit;
 
+  /// The last checkout URL we created, kept so the pending banner can offer a
+  /// manual "open payment page" button if the browser blocked the pop-up.
+  String? _checkoutUrl;
+
+  /// Guards against a second top-up being started while one is still being
+  /// created, so a double tap cannot open two payment pages.
+  bool _creatingTopUp = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _wallet = _loadWallet();
+  }
+
+  /// A payment can settle in the background (webhook) while the app is away,
+  /// so coming back refreshes the balance.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _reload();
   }
 
   Future<Map<String, dynamic>> _loadWallet() =>
       ref.read(apiClientProvider).getMap('/captains/wallet');
 
-  void _reload() => setState(() {
-    _wallet = _loadWallet();
-  });
+  void _reload() {
+    if (!mounted) return;
+    setState(() {
+      _wallet = _loadWallet();
+    });
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     super.dispose();
   }
 
   Future<void> _addFunds() async {
-    var text = '';
-    final value = await showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add wallet funds'),
-        content: TextField(
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Amount in EGP'),
-          onChanged: (value) => text = value,
-          onSubmitted: (value) => Navigator.pop(
-            context,
-            double.tryParse(value.trim()),
+    if (_creatingTopUp) return;
+    setState(() => _creatingTopUp = true);
+    try {
+      var text = '';
+      final value = await showDialog<double>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(tr(ar: 'شحن الرصيد', en: 'Add wallet funds')),
+          content: TextField(
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: tr(ar: 'المبلغ بالجنيه', en: 'Amount in EGP'),
+            ),
+            onChanged: (value) => text = value,
+            onSubmitted: (value) => Navigator.pop(
+              context,
+              double.tryParse(value.trim()),
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(tr(ar: 'إلغاء', en: 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(context, double.tryParse(text.trim())),
+              child: Text(tr(ar: 'متابعة', en: 'Continue')),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+      );
+      if (value == null) return;
+      if (!mounted) return;
+      if (value < 1) {
+        _showMessage(
+          context,
+          tr(
+            ar: 'أدخل مبلغًا لا يقل عن ١ جنيه.',
+            en: 'Enter an amount of at least 1 EGP.',
           ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, double.tryParse(text.trim())),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
-    if (value == null) return;
-    if (!mounted) return;
-    if (value < 1) {
-      _showMessage(context, 'Enter an amount of at least 1 EGP.');
-      return;
+        );
+        return;
+      }
+      await _createTopUp(value);
+    } finally {
+      if (mounted) setState(() => _creatingTopUp = false);
     }
-    await _createTopUp(value);
   }
 
   Future<void> _createTopUp(double amount) async {
@@ -2638,7 +2679,34 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     if (confirmed != true || !mounted) return;
     final uri = Uri.tryParse('${quote['checkoutUrl'] ?? ''}');
     if (uri == null || !uri.hasScheme) {
-      _showMessage(context, 'Could not open the payment page.');
+      _showMessage(
+        context,
+        tr(ar: 'تعذّر فتح صفحة الدفع.', en: 'Could not open the payment page.'),
+      );
+      return;
+    }
+    // Remember the URL so the pending banner can reopen it manually.
+    setState(() => _checkoutUrl = uri.toString());
+    await _openCheckout();
+    // The create response carries the exact id; only fall back to "latest"
+    // for older servers that do not return it.
+    final id = (quote['topUpId'] as String?) ?? await _latestTopUpId();
+    if (!mounted || id == null) return;
+    _watch(id, credit);
+  }
+
+  /// Opens the stored checkout URL in the browser. Called right after creating
+  /// the top-up and again from the banner button (a direct tap, which web
+  /// pop-up blockers always allow).
+  Future<void> _openCheckout() async {
+    final raw = _checkoutUrl;
+    if (raw == null) return;
+    final uri = Uri.tryParse(raw);
+    if (uri == null || !uri.hasScheme) {
+      _showMessage(
+        context,
+        tr(ar: 'تعذّر فتح صفحة الدفع.', en: 'Could not open the payment page.'),
+      );
       return;
     }
     var opened = false;
@@ -2649,11 +2717,15 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     }
     if (!mounted) return;
     if (!opened) {
-      _showMessage(context, 'Open the payment page in your browser to finish.');
+      _showMessage(
+        context,
+        tr(
+          ar: 'تعذّر فتح المتصفح تلقائيًا. اضغط «افتح صفحة الدفع» بالأسفل.',
+          en: 'Could not open the browser automatically. Tap "Open payment '
+              'page" below.',
+        ),
+      );
     }
-    final id = await _latestTopUpId();
-    if (!mounted || id == null) return;
-    _watch(id, credit);
   }
 
   Future<String?> _latestTopUpId() async {
@@ -2676,10 +2748,25 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       _pendingCredit = credit.toStringAsFixed(2);
     });
     _check(id);
-    _poll = Timer.periodic(_pollInterval, (_) {
+    _poll = Timer.periodic(widget.pollInterval, (_) {
       _polls += 1;
-      if (_polls > _maxPolls) {
+      if (_polls > widget.maxPolls) {
         _poll?.cancel();
+        if (!mounted) return;
+        setState(() {
+          _pendingTopUpId = null;
+          _checkoutUrl = null;
+        });
+        // The payment may still be settling on the provider side. This is not
+        // a failure, so reassure the captain instead of showing an error.
+        _showMessage(
+          context,
+          tr(
+            ar: 'ما زال الدفع قيد التأكيد، سيُحدَّث رصيدك تلقائيًا',
+            en: 'Payment is still being confirmed; your balance will update '
+                'automatically.',
+          ),
+        );
         return;
       }
       _check(id);
@@ -2697,17 +2784,31 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final status = '${topUp['status'] ?? ''}';
     if (status == 'SUCCEEDED') {
       _poll?.cancel();
-      setState(() => _pendingTopUpId = null);
+      setState(() {
+        _pendingTopUpId = null;
+        _checkoutUrl = null;
+      });
       _reload();
-      _showMessage(context, 'Wallet topped up successfully.');
+      _showMessage(
+        context,
+        tr(ar: 'تم شحن المحفظة بنجاح.', en: 'Wallet topped up successfully.'),
+      );
     } else if (status == 'FAILED' || status == 'EXPIRED') {
       _poll?.cancel();
-      setState(() => _pendingTopUpId = null);
+      setState(() {
+        _pendingTopUpId = null;
+        _checkoutUrl = null;
+      });
       final reason = topUp['failureReason'] as String?;
       _showMessage(
         context,
         reason == null || reason.isEmpty
-            ? 'Top-up ${status.toLowerCase()}.'
+            ? tr(
+                ar: status == 'FAILED'
+                    ? 'فشل شحن الرصيد.'
+                    : 'انتهت صلاحية عملية الشحن.',
+                en: 'Top-up ${status.toLowerCase()}.',
+              )
             : reason,
       );
     }
@@ -2715,7 +2816,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Captain wallet')),
+    appBar: AppBar(
+      title: Text(tr(ar: 'محفظة المندوب', en: 'Captain wallet')),
+    ),
     body: FutureBuilder<Map<String, dynamic>>(
       future: _wallet,
       builder: (context, snapshot) {
@@ -2735,6 +2838,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               _PendingTopUpBanner(
                 credit: _pendingCredit,
                 onCheck: () => _check(_pendingTopUpId!),
+                onOpenPayment: _checkoutUrl == null ? null : _openCheckout,
               ),
               const SizedBox(height: 18),
             ],
@@ -2747,9 +2851,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'AVAILABLE BALANCE',
-                    style: TextStyle(
+                  Text(
+                    tr(ar: 'الرصيد المتاح', en: 'AVAILABLE BALANCE'),
+                    style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 10,
                       letterSpacing: 1,
@@ -2758,7 +2862,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   ),
                   const SizedBox(height: 7),
                   Text(
-                    'EGP ${asDouble(wallet['balance']).toStringAsFixed(2)}',
+                    moneyLabel(asDouble(wallet['balance'])),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 29,
@@ -2767,9 +2871,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   ),
                   const SizedBox(height: 13),
                   OutlinedButton.icon(
-                    onPressed: _addFunds,
+                    onPressed: _creatingTopUp ? null : _addFunds,
                     icon: const Icon(Icons.add, size: 17),
-                    label: const Text('Add funds'),
+                    label: Text(tr(ar: 'شحن الرصيد', en: 'Add funds')),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.white,
                       side: const BorderSide(color: Colors.white54),
@@ -2779,13 +2883,16 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               ),
             ),
             const SizedBox(height: 22),
-            const _SectionTitle(title: 'Transactions'),
+            _SectionTitle(title: tr(ar: 'المعاملات', en: 'Transactions')),
             const SizedBox(height: 9),
             if (transactions.isEmpty)
-              const _EmptyState(
+              _EmptyState(
                 icon: Icons.receipt_long_outlined,
-                title: 'No transactions yet',
-                subtitle: 'Wallet activity will appear here.',
+                title: tr(ar: 'لا توجد معاملات بعد', en: 'No transactions yet'),
+                subtitle: tr(
+                  ar: 'ستظهر حركة المحفظة هنا.',
+                  en: 'Wallet activity will appear here.',
+                ),
               ),
             for (final item in transactions)
               _TransactionRow(data: Map<String, dynamic>.from(item as Map)),
@@ -2797,13 +2904,22 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 }
 
 /// Top-up fee breakdown shown before the hosted payment page is opened.
-class _CheckoutSheet extends StatelessWidget {
+class _CheckoutSheet extends StatefulWidget {
   const _CheckoutSheet({
     required this.credit,
     required this.fee,
     required this.charge,
   });
   final double credit, fee, charge;
+
+  @override
+  State<_CheckoutSheet> createState() => _CheckoutSheetState();
+}
+
+class _CheckoutSheetState extends State<_CheckoutSheet> {
+  /// Disables the button on the first tap so a quick double tap cannot start
+  /// two top-ups.
+  bool _submitting = false;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -2813,33 +2929,50 @@ class _CheckoutSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Top-up summary',
-            style: TextStyle(
+          Text(
+            tr(ar: 'ملخص الشحن', en: 'Top-up summary'),
+            style: const TextStyle(
               color: _ink,
               fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(height: 14),
-          _MoneyLine(label: 'Wallet credit', value: credit),
-          _MoneyLine(label: 'Service fee', value: fee),
+          _MoneyLine(
+            label: tr(ar: 'رصيد المحفظة', en: 'Wallet credit'),
+            value: widget.credit,
+          ),
+          _MoneyLine(
+            label: tr(ar: 'رسوم الخدمة', en: 'Service fee'),
+            value: widget.fee,
+          ),
           const Divider(height: 22),
-          _MoneyLine(label: 'Total to pay', value: charge, bold: true),
+          _MoneyLine(
+            label: tr(ar: 'الإجمالي المطلوب', en: 'Total to pay'),
+            value: widget.charge,
+            bold: true,
+          ),
           const SizedBox(height: 18),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Later'),
+                  onPressed: _submitting
+                      ? null
+                      : () => Navigator.pop(context, false),
+                  child: Text(tr(ar: 'لاحقًا', en: 'Later')),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Pay now'),
+                  onPressed: _submitting
+                      ? null
+                      : () {
+                          setState(() => _submitting = true);
+                          Navigator.pop(context, true);
+                        },
+                  child: Text(tr(ar: 'ادفع الآن', en: 'Pay now')),
                 ),
               ),
             ],
@@ -2876,7 +3009,7 @@ class _MoneyLine extends StatelessWidget {
           ),
         ),
         Text(
-          'EGP ${value.toStringAsFixed(2)}',
+          moneyLabel(value),
           style: TextStyle(
             color: _ink,
             fontSize: bold ? 16 : 13,
@@ -2890,9 +3023,17 @@ class _MoneyLine extends StatelessWidget {
 
 /// Shown while the app waits for the Kashier webhook to settle the payment.
 class _PendingTopUpBanner extends StatelessWidget {
-  const _PendingTopUpBanner({required this.credit, required this.onCheck});
+  const _PendingTopUpBanner({
+    required this.credit,
+    required this.onCheck,
+    this.onOpenPayment,
+  });
   final String? credit;
   final VoidCallback onCheck;
+
+  /// Reopens the checkout page. A direct tap always passes web pop-up
+  /// blockers, so this is the fallback when the automatic launch was blocked.
+  final VoidCallback? onOpenPayment;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -2902,38 +3043,76 @@ class _PendingTopUpBanner extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       border: Border.all(color: const Color(0xFFF0D9A8)),
     ),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2),
+        Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                credit == null
+                    ? tr(
+                        ar: 'في انتظار تأكيد الدفع…',
+                        en: 'Waiting for payment confirmation…',
+                      )
+                    : tr(
+                        ar: 'في انتظار تأكيد شحن $credit…',
+                        en: 'Waiting for the EGP $credit top-up to be '
+                            'confirmed…',
+                      ),
+                style: const TextStyle(color: _ink, fontSize: 12),
+              ),
+            ),
+            TextButton(
+              onPressed: onCheck,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                tr(ar: 'تحقق الآن', en: 'Check now'),
+                style: const TextStyle(
+                  color: _green,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            credit == null
-                ? 'Waiting for payment confirmation…'
-                : 'Waiting for the EGP $credit top-up to be confirmed…',
-            style: const TextStyle(color: _ink, fontSize: 12),
-          ),
-        ),
-        TextButton(
-          onPressed: onCheck,
-          style: TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          child: const Text(
-            'Check now',
-            style: TextStyle(
-              color: _green,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+        if (onOpenPayment != null) ...[
+          const SizedBox(height: 4),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: onOpenPayment,
+              icon: const Icon(Icons.open_in_new, size: 15),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: _green,
+              ),
+              label: Text(
+                tr(
+                  ar: 'افتح صفحة الدفع',
+                  en: 'Open payment page',
+                ),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
-        ),
+        ],
       ],
     ),
   );
@@ -2958,7 +3137,7 @@ class _TransactionRow extends StatelessWidget {
         ),
       ),
       title: Text(
-        '${data['type'] ?? 'Transaction'}'.replaceAll('_', ' '),
+        walletTransactionLabel(data['type']),
         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
@@ -2966,7 +3145,7 @@ class _TransactionRow extends StatelessWidget {
         style: const TextStyle(fontSize: 10, color: _muted),
       ),
       trailing: Text(
-        'EGP ${amount.abs().toStringAsFixed(2)}',
+        moneyLabel(amount.abs()),
         style: const TextStyle(fontWeight: FontWeight.w700, color: _ink),
       ),
     );

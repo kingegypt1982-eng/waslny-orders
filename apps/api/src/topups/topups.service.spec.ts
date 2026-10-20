@@ -5,6 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { createHmac } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildSignaturePayload } from './kashier-signature';
 import { KashierClient } from './kashier.client';
@@ -48,7 +49,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     captainProfile: { findUnique: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
     user: { findUnique: jest.fn() },
-    topUp: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
+    topUp: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
     wallet: { update: jest.fn() },
     walletTransaction: { create: jest.fn() },
   };
@@ -70,9 +71,10 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     jest.clearAllMocks();
     prisma.$transaction.mockImplementation(async (callback: any) => callback(tx));
     prisma.pricingSettings.upsert.mockResolvedValue({ minTopUpAmount: 50, maxTopUpAmount: 10000, paymentFeePercent: 2.5, paymentFeeFixed: 0 });
+    prisma.topUp.findFirst.mockResolvedValue(null);
   });
 
-  it('creates a PENDING top-up and returns only the checkout URL', async () => {
+  it('creates a PENDING top-up and returns the checkout URL and id', async () => {
     prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
     prisma.user.findUnique.mockResolvedValue({ email: 'cap@test.com' });
     prisma.topUp.create.mockImplementation(async ({ data }: any) => ({ id: 't1', status: 'PENDING', ...data }));
@@ -81,7 +83,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     // 200 credit at 2.5% + 0 fixed -> 200 / 0.975 = 205.128... -> charge 205.13
     const result = await service.createTopUp('cap1', 200);
 
-    expect(result).toEqual({ checkoutUrl: 'https://pay.test/sess-1', creditAmount: 200, chargeAmount: 205.13, feeAmount: 5.13 });
+    expect(result).toEqual({ topUpId: 't1', checkoutUrl: 'https://pay.test/sess-1', creditAmount: 200, chargeAmount: 205.13, feeAmount: 5.13 });
     expect(kashier.createSession).toHaveBeenCalledWith({
       amount: '205.13',
       currency: 'EGP',
@@ -99,6 +101,29 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     expect(stored.creditAmount.toFixed(2)).toBe('200.00');
     expect(stored.chargeAmount.toFixed(2)).toBe('205.13');
     expect(stored.feeAmount.toFixed(2)).toBe('5.13');
+  });
+
+  it('reuses a recent PENDING top-up instead of creating a duplicate', async () => {
+    prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    prisma.topUp.findFirst.mockResolvedValue({
+      id: 'existing',
+      creditAmount: new Prisma.Decimal('200.00'),
+      chargeAmount: new Prisma.Decimal('205.13'),
+      feeAmount: new Prisma.Decimal('5.13'),
+      checkoutUrl: 'https://pay.test/existing',
+    });
+
+    const result = await service.createTopUp('cap1', 200);
+
+    expect(result).toEqual({
+      topUpId: 'existing',
+      checkoutUrl: 'https://pay.test/existing',
+      creditAmount: 200,
+      chargeAmount: 205.13,
+      feeAmount: 5.13,
+    });
+    expect(prisma.topUp.create).not.toHaveBeenCalled();
+    expect(kashier.createSession).not.toHaveBeenCalled();
   });
 
   it('rejects amounts outside the admin-configured limits', async () => {
@@ -362,7 +387,9 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     kashier.createSession.mockResolvedValue({ sessionId: 'sess-1', checkoutUrl: 'https://pay.test/sess-1' });
 
     const result = await service.createTopUp('cap1', 200);
-    expect(Object.keys(result).sort()).toEqual(['chargeAmount', 'checkoutUrl', 'creditAmount', 'feeAmount']);
+    expect(Object.keys(result).sort()).toEqual([
+      'chargeAmount', 'checkoutUrl', 'creditAmount', 'feeAmount', 'topUpId',
+    ]);
   });
 
   it('uses the real signature path end to end', async () => {

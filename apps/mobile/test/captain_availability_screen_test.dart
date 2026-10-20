@@ -55,6 +55,9 @@ void main() {
     expect(find.text('صافي ربحك: EGP 40'), findsNWidgets(2));
     expect(find.text('قبول الطلب'), findsNWidgets(2));
     expect(find.text('تخطي'), findsNWidgets(2));
+    // The raw `PACKAGE` enum is rendered as an Arabic label, never verbatim.
+    expect(find.textContaining('PACKAGE'), findsNothing);
+    expect(find.textContaining('طرد ·'), findsNWidgets(2));
     expect(find.text('30 ث'), findsNWidgets(2)); // offer countdown bars
     expect(
       tester.getTopLeft(find.text('0.4 كم من موقعك')).dy,
@@ -131,7 +134,7 @@ void main() {
     expect(find.text('TRIP o1'), findsOneWidget);
   });
 
-  testWidgets('a 409 on accept keeps the captain on the feed with a message', (
+  testWidgets('a 409 on accept drops the card with a friendly message', (
     tester,
   ) async {
     final api = _FakeApi(await _preferences())
@@ -143,11 +146,15 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 30));
 
-    expect(find.text('Order was accepted by another captain'), findsOneWidget);
+    expect(find.textContaining('لم يعد هذا الطلب متاحًا'), findsOneWidget);
     expect(find.text('TRIP o1'), findsNothing);
+    expect(find.text('قبول الطلب'), findsNothing);
+    expect(find.textContaining('الطلبات القريبة (0)'), findsOneWidget);
+    // The order was taken by someone else, so it is not reported as skipped.
+    expect(api.postPaths, isNot(contains('/orders/o1/skip')));
   });
 
-  testWidgets('an offer that runs out of time is skipped and never returns', (
+  testWidgets('an offer that runs out of time is hidden locally only', (
     tester,
   ) async {
     final api = _FakeApi(await _preferences())
@@ -162,13 +169,35 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(api.postPaths, contains('/orders/o1/skip'));
+    // Expiry is a client-side convenience: no skip is sent to the server.
+    expect(api.postPaths, isNot(contains('/orders/o1/skip')));
     expect(find.text('قبول الطلب'), findsNothing);
 
     // A later poll must not bring the expired offer back.
     await tester.pump(const Duration(seconds: 5));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.textContaining('الطلبات القريبة (0)'), findsOneWidget);
+  });
+
+  testWidgets('returning to the foreground re-fetches the feed', (
+    tester,
+  ) async {
+    final api = _FakeApi(await _preferences())
+      ..orders = [_order(id: 'o1', distance: 0.6)];
+    await _pumpAvailability(tester, api);
+    final before = api.listCalls;
+
+    api.orders = [
+      _order(id: 'o1', distance: 0.6),
+      _order(id: 'o2', distance: 1.2),
+    ];
+    // ignore: invalid_use_of_protected_member
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    expect(api.listCalls, greaterThan(before));
+    expect(find.textContaining('الطلبات القريبة (2)'), findsOneWidget);
   });
 
   testWidgets('a fresh offer slides in at the top and one taken away leaves', (
@@ -366,6 +395,7 @@ class _FakeApi extends ApiClient {
   final postPaths = <String>[];
   final postBodies = <Map<String, dynamic>>[];
   final patchBodies = <Map<String, dynamic>>[];
+  int listCalls = 0;
   bool conflictAccept = false;
   Map<String, dynamic> profile = {
     'isOnline': true,
@@ -386,9 +416,11 @@ class _FakeApi extends ApiClient {
   Future<List<dynamic>> getList(
     String path, {
     Map<String, dynamic>? query,
-  }) async => path == '/orders/available'
-      ? orders.map((order) => Map<String, dynamic>.from(order)).toList()
-      : <dynamic>[];
+  }) async {
+    if (path != '/orders/available') return <dynamic>[];
+    listCalls += 1;
+    return orders.map((order) => Map<String, dynamic>.from(order)).toList();
+  }
 
   @override
   Future<Map<String, dynamic>> post(String path, {Object? data}) async {

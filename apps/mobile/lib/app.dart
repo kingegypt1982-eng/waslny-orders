@@ -12,6 +12,7 @@ import 'screens/captain_trip_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'screens/order_review_screen.dart';
+import 'screens/payment_redirect_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
@@ -121,6 +122,10 @@ final routerProvider = Provider<GoRouter>(
       GoRoute(
         path: '/wallet',
         builder: (context, state) => const WalletScreen(),
+      ),
+      GoRoute(
+        path: '/payment-redirect',
+        builder: (context, state) => const PaymentRedirectScreen(),
       ),
       GoRoute(
         path: '/notifications',
