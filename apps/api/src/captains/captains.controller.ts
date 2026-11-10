@@ -265,8 +265,15 @@ export class CaptainsController {
     });
   }
 
-  @Get('wallet') wallet(@CurrentUser() user: { id: string }) {
-    return this.prisma.wallet.findUnique({ where: { userId: user.id }, include: { user: { select: { walletTransactions: { orderBy: { createdAt: 'desc' }, take: 50 } } } } });
+  @Get('wallet') async wallet(@CurrentUser() user: { id: string }) {
+    const [wallet, pricing] = await Promise.all([
+      this.prisma.wallet.findUnique({
+        where: { userId: user.id },
+        include: { user: { select: { walletTransactions: { orderBy: { createdAt: 'desc' }, take: 50 } } } },
+      }),
+      this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} }),
+    ]);
+    return { ...wallet, minimumWalletBalance: pricing.minimumWalletBalance };
   }
 }
 

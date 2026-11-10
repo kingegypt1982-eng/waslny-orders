@@ -30,6 +30,7 @@ describe('OrdersService wallet rules', () => {
     purchaseInvoice: { findUnique: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
     captainProfile: { findUnique: jest.fn(), update: jest.fn() },
+    wallet: { findUnique: jest.fn() },
     user: { findUnique: jest.fn() },
   };
   const redis = { nearbyCaptains: jest.fn(), updateCaptainLocation: jest.fn() };
@@ -158,6 +159,16 @@ describe('OrdersService wallet rules', () => {
 
     it('returns an empty feed while the captain is offline', async () => {
       prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE', isOnline: false, serviceRadiusKm: 10 });
+
+      await expect(service.available('cap1', 30, 31)).resolves.toEqual([]);
+      expect(prisma.order.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns no orders when the wallet is below the configured minimum', async () => {
+      prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE', isOnline: true, serviceRadiusKm: 10 });
+      prisma.wallet.findUnique.mockResolvedValue({ balance: 49 });
+      prisma.pricingSettings.upsert.mockResolvedValue({ minimumWalletBalance: 50, minRadiusKm: 2, maxRadiusKm: 15 });
+      prisma.captainProfile.update.mockResolvedValue({});
 
       await expect(service.available('cap1', 30, 31)).resolves.toEqual([]);
       expect(prisma.order.findMany).not.toHaveBeenCalled();

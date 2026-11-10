@@ -18,6 +18,7 @@ describe('CaptainsController profile', () => {
   const prisma = {
     captainProfile: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
+    wallet: { findUnique: jest.fn() },
   };
   const redis = { updateCaptainLocation: jest.fn() };
   const originalKey = process.env.NATIONAL_ID_ENCRYPTION_KEY;
@@ -48,6 +49,16 @@ describe('CaptainsController profile', () => {
     await expect(
       controller.updateProfile({ id: 'u1' }, { nationalId: '123' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('includes the configured minimum wallet balance in the wallet response', async () => {
+    prisma.wallet.findUnique.mockResolvedValue({ balance: 40, user: { walletTransactions: [] } });
+    prisma.pricingSettings.upsert.mockResolvedValue({ minimumWalletBalance: 75 });
+
+    await expect(controller.wallet({ id: 'u1' })).resolves.toMatchObject({
+      balance: 40,
+      minimumWalletBalance: 75,
+    });
   });
 
   it('rejects a duplicate national ID with 409 and does not reveal the other account', async () => {

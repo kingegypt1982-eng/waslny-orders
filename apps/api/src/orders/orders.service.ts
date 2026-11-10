@@ -164,6 +164,11 @@ export class OrdersService {
     if (!captain.isOnline) return [];
 
     const settings = await this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId },
+      select: { balance: true },
+    });
+    if (Number(wallet?.balance ?? 0) < Number(settings.minimumWalletBalance)) return [];
     const minRadius = Number(settings.minRadiusKm ?? DEFAULT_MIN_RADIUS_KM);
     const maxRadius = Number(settings.maxRadiusKm ?? DEFAULT_MAX_RADIUS_KM);
     const ownRadius = Number(captain.serviceRadiusKm) || maxRadius;

@@ -2829,6 +2829,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
             child: _ErrorBox(message: ApiClient.errorMessage(snapshot.error!)),
           );
         final wallet = snapshot.data ?? {};
+        final balance = asDouble(wallet['balance']);
+        final minimumWalletBalance = asDouble(wallet['minimumWalletBalance']);
         final user = wallet['user'] as Map?;
         final transactions = (user?['walletTransactions'] as List?) ?? [];
         return ListView(
@@ -2862,13 +2864,31 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
                   ),
                   const SizedBox(height: 7),
                   Text(
-                    moneyLabel(asDouble(wallet['balance'])),
+                    moneyLabel(balance),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 29,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                  const SizedBox(height: 7),
+                  Text(
+                    tr(
+                      ar: 'الحد الأدنى لاستقبال الطلبات: ${moneyLabel(minimumWalletBalance)}',
+                      en: 'Minimum to receive orders: ${moneyLabel(minimumWalletBalance)}',
+                    ),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                  if (balance < minimumWalletBalance) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      tr(
+                        ar: 'رصيدك أقل من الحد الأدنى؛ استقبال الطلبات متوقف.',
+                        en: 'Your balance is below the minimum; new orders are paused.',
+                      ),
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
                   const SizedBox(height: 13),
                   OutlinedButton.icon(
                     onPressed: _creatingTopUp ? null : _addFunds,

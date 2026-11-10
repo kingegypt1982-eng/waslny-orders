@@ -20,6 +20,11 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('EGP 39.44'), findsOneWidget);
+    expect(find.text('Minimum to receive orders: EGP 50.00'), findsOneWidget);
+    expect(
+      find.text('Your balance is below the minimum; new orders are paused.'),
+      findsOneWidget,
+    );
     expect(find.text('TOP UP'), findsOneWidget);
     expect(find.text('EGP 10.00'), findsOneWidget);
   });
@@ -30,10 +35,13 @@ void main() {
     final api = _WalletApi(await _preferences());
     Uri? opened;
     await tester.pumpWidget(
-      _app(api, onOpen: (uri) async {
-        opened = uri;
-        return true;
-      }),
+      _app(
+        api,
+        onOpen: (uri) async {
+          opened = uri;
+          return true;
+        },
+      ),
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -138,11 +146,7 @@ void main() {
   ) async {
     final api = _WalletApi(await _preferences());
     await tester.pumpWidget(
-      _app(
-        api,
-        pollInterval: const Duration(seconds: 1),
-        maxPolls: 1,
-      ),
+      _app(api, pollInterval: const Duration(seconds: 1), maxPolls: 1),
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -188,6 +192,14 @@ void main() {
     expect(find.text('محفظة المندوب'), findsOneWidget);
     expect(find.text('الرصيد المتاح'), findsOneWidget);
     expect(find.text('ج.م 39.44'), findsOneWidget);
+    expect(
+      find.text('الحد الأدنى لاستقبال الطلبات: ج.م 50.00'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('رصيدك أقل من الحد الأدنى؛ استقبال الطلبات متوقف.'),
+      findsOneWidget,
+    );
     expect(find.text('شحن الرصيد'), findsOneWidget);
     expect(find.text('المعاملات'), findsOneWidget);
     expect(find.text('شحن رصيد'), findsOneWidget); // transaction type
@@ -324,6 +336,7 @@ class _WalletApi extends ApiClient {
     if (path == '/captains/wallet') {
       return {
         'balance': balance,
+        'minimumWalletBalance': '50.00',
         'user': {
           'id': 'captain-1',
           'walletTransactions': [
