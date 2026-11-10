@@ -6,18 +6,22 @@ const prisma = new PrismaClient();
 
 async function main() {
   const isProduction = process.env.NODE_ENV === 'production';
-  // In production the credentials must come from the environment: never fall
-  // back to a default password there. Locally the defaults below apply.
+  // The email may fall back to the development default; the password never
+  // does, in any environment.
   const adminEmail = process.env.ADMIN_EMAIL ?? (isProduction ? undefined : 'admin@waslny.com');
-  const adminPassword = process.env.ADMIN_PASSWORD ?? (isProduction ? undefined : 'Admin@123');
-  if (!adminEmail || !adminPassword) {
-    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be set to seed in production.');
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminEmail) {
+    throw new Error('ADMIN_EMAIL is not set. Set it before running `npm run prisma:seed`.');
   }
-  // Seeding with a placeholder in production would create a known login.
-  if (isProduction) {
-    const problem = findRejectedSecret({ NODE_ENV: process.env.NODE_ENV, ADMIN_PASSWORD: adminPassword });
-    if (problem) throw new Error(`${problem}. Refusing to seed production.`);
+  if (!adminPassword || !adminPassword.trim()) {
+    throw new Error(
+      'ADMIN_PASSWORD is not set. Set it in apps/api/.env (or export it) before running `npm run prisma:seed`. There is no default password.',
+    );
   }
+  // Known placeholders (including the former development default) are refused
+  // in every environment so a documented password can never become a live login.
+  const problem = findRejectedSecret({ NODE_ENV: process.env.NODE_ENV, ADMIN_PASSWORD: adminPassword });
+  if (problem) throw new Error(`${problem}. Set a unique ADMIN_PASSWORD before seeding.`);
 
   const passwordHash = await bcrypt.hash(adminPassword, 12);
 

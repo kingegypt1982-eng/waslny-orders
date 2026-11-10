@@ -41,6 +41,8 @@ npm run prisma:migrate --workspace api
 npm run dev:api
 ```
 
+> `npm run prisma:migrate` also runs the seed. Set `ADMIN_PASSWORD` in `apps/api/.env` to a unique value first: there is no default password in any environment, and known placeholders are refused with a clear error.
+
 In a second terminal, start the dashboard with `npm run dev:admin`. The mobile app can run with `cd apps/mobile; flutter pub get; flutter run`. On Android emulators, set `API_BASE_URL=http://10.0.2.2:3000/api/v1`; on iOS simulators use `http://localhost:3000/api/v1`.
 
 ## Environment isolation
