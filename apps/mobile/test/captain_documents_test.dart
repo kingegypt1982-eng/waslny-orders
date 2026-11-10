@@ -6,9 +6,12 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:wasalny_orders/core/api_client.dart';
+import 'package:wasalny_orders/core/texts.dart';
 import 'package:wasalny_orders/screens.dart';
 
 void main() {
+  setUp(() => appLanguage.value = 'en');
+
   group('validateEgyptianNationalId', () {
     test('accepts a valid national ID and derives the birth date', () {
       final result = validateEgyptianNationalId(
@@ -21,10 +24,7 @@ void main() {
     });
 
     test('rejects a value that is not 14 digits', () {
-      expect(
-        validateEgyptianNationalId('123').error,
-        NationalIdError.length,
-      );
+      expect(validateEgyptianNationalId('123').error, NationalIdError.length);
       expect(
         validateEgyptianNationalId('3000101011234').error,
         NationalIdError.length,
@@ -79,17 +79,17 @@ void main() {
       profile: {
         'nationalIdLast4': '2345',
         'nationalIdDocument': 'uploaded',
-          'nationalIdBackDocument': 'uploaded',
-          'profilePhotoDocument': 'uploaded',
-          'licenseNumber': null,
-          'licenseDocument': 'uploaded',
-          'licenseBackDocument': 'uploaded',
-          'vehicleRegistrationNumber': null,
-          'vehiclePlate': null,
-          'vehicleMake': null,
-          'vehicleColor': null,
-          'vehicleDocument': 'uploaded',
-          'vehicleBackDocument': 'uploaded',
+        'nationalIdBackDocument': 'uploaded',
+        'profilePhotoDocument': 'uploaded',
+        'licenseNumber': null,
+        'licenseDocument': 'uploaded',
+        'licenseBackDocument': 'uploaded',
+        'vehicleRegistrationNumber': null,
+        'vehiclePlate': null,
+        'vehicleMake': null,
+        'vehicleColor': null,
+        'vehicleDocument': 'uploaded',
+        'vehicleBackDocument': 'uploaded',
         'governorate': null,
         'dateOfBirth': null,
         'user': {'phone': ''},
@@ -165,17 +165,17 @@ void main() {
       profile: {
         'nationalIdLast4': null,
         'nationalIdDocument': 'uploaded',
-          'nationalIdBackDocument': 'uploaded',
-          'profilePhotoDocument': 'uploaded',
-          'licenseNumber': null,
-          'licenseDocument': 'PENDING_UPLOAD',
-          'licenseBackDocument': 'PENDING_UPLOAD',
-          'vehicleRegistrationNumber': null,
-          'vehiclePlate': null,
-          'vehicleMake': null,
-          'vehicleColor': null,
-          'vehicleDocument': 'PENDING_UPLOAD',
-          'vehicleBackDocument': 'PENDING_UPLOAD',
+        'nationalIdBackDocument': 'uploaded',
+        'profilePhotoDocument': 'uploaded',
+        'licenseNumber': null,
+        'licenseDocument': 'PENDING_UPLOAD',
+        'licenseBackDocument': 'PENDING_UPLOAD',
+        'vehicleRegistrationNumber': null,
+        'vehiclePlate': null,
+        'vehicleMake': null,
+        'vehicleColor': null,
+        'vehicleDocument': 'PENDING_UPLOAD',
+        'vehicleBackDocument': 'PENDING_UPLOAD',
         'governorate': null,
         'dateOfBirth': null,
         'user': {'phone': ''},
@@ -215,10 +215,16 @@ void main() {
     await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
 
-    expect(find.text('This national ID is already registered.'), findsOneWidget);
+    expect(
+      find.text('This national ID is already registered.'),
+      findsOneWidget,
+    );
     expect(find.text('Personal details'), findsOneWidget);
     expect(api.patches, isEmpty);
-    expect(router.routeInformationProvider.value.uri.path, '/captain-documents');
+    expect(
+      router.routeInformationProvider.value.uri.path,
+      '/captain-documents',
+    );
   });
 
   testWidgets('vehicle step blocks finish without a plate, brand, or color', (
@@ -427,6 +433,8 @@ void main() {
   testWidgets('vehicle plate field is editable and shows Arabic hint', (
     tester,
   ) async {
+    appLanguage.value = 'ar';
+    addTearDown(() => appLanguage.value = 'en');
     SharedPreferences.setMockInitialValues({});
     final preferences = await SharedPreferences.getInstance();
     final api = _WizardApiClient(
@@ -467,11 +475,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Vehicle details'), findsOneWidget);
+    expect(find.text('بيانات المركبة'), findsOneWidget);
     final plateField = tester.widget<TextField>(find.byType(TextField).at(0));
     expect(plateField.textDirection, TextDirection.rtl);
     expect(plateField.decoration?.hintText, contains('2173'));
-    expect(find.text('Vehicle license number'), findsOneWidget);
+    expect(find.text('رقم رخصة المركبة'), findsOneWidget);
   });
 }
 
