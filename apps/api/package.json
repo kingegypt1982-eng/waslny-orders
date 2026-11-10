@@ -21,6 +21,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "admin:set-password": "ts-node prisma/set-admin-password.ts",
     "seed:demo-orders": "ts-node prisma/seed-demo-orders.ts"
   },
   "prisma": {

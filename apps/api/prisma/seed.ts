@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { findRejectedSecret } from '../src/security/secret-guard';
 
 const prisma = new PrismaClient();
 
@@ -11,6 +12,11 @@ async function main() {
   const adminPassword = process.env.ADMIN_PASSWORD ?? (isProduction ? undefined : 'Admin@123');
   if (!adminEmail || !adminPassword) {
     throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be set to seed in production.');
+  }
+  // Seeding with a placeholder in production would create a known login.
+  if (isProduction) {
+    const problem = findRejectedSecret({ NODE_ENV: process.env.NODE_ENV, ADMIN_PASSWORD: adminPassword });
+    if (problem) throw new Error(`${problem}. Refusing to seed production.`);
   }
 
   const passwordHash = await bcrypt.hash(adminPassword, 12);
