@@ -59,7 +59,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     getOrderByMerchantRef: jest.fn(),
     verifyWebhook: jest.fn(),
     webhookUrl: 'https://tunnel.test/webhooks/kashier',
-    redirectUrl: 'myapp://wallet/topup-result',
+    redirectUrl: 'https://app.test/payment-redirect',
   };
 
   const service = new TopUpsService(
@@ -83,6 +83,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    kashier.redirectUrl = 'https://app.test/payment-redirect';
     for (const key of ENV_KEYS) delete process.env[key];
     prisma.$transaction.mockImplementation(async (callback: any) => callback(tx));
     prisma.pricingSettings.upsert.mockResolvedValue({ minTopUpAmount: 50, maxTopUpAmount: 10000, paymentFeePercent: 2.5, paymentFeeFixed: 0 });
@@ -111,7 +112,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
       currency: 'EGP',
       orderRef: expect.stringMatching(/^topup_[0-9a-f]{32}$/),
       description: expect.stringContaining('topup_'),
-      redirectUrl: 'myapp://wallet/topup-result',
+      redirectUrl: 'https://app.test/payment-redirect',
       customer: { email: 'cap@test.com', reference: 'cap1' },
     });
     expect(prisma.topUp.create).toHaveBeenCalledWith({
@@ -147,6 +148,17 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     expect(kashier.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ redirectUrl: 'http://localhost:5173/payment-redirect' }),
     );
+  });
+
+  it('rejects a custom-scheme return URL before creating a top-up', async () => {
+    stubPendingTopUp();
+    kashier.redirectUrl = 'myapp://wallet/topup-result';
+
+    await expect(service.createTopUp('cap1', 200)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(prisma.topUp.create).not.toHaveBeenCalled();
+    expect(kashier.createSession).not.toHaveBeenCalled();
   });
 
   it('reuses a recent PENDING top-up instead of creating a duplicate', async () => {

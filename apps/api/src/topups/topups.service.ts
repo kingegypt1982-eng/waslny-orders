@@ -122,6 +122,14 @@ export class TopUpsService {
         feeAmount: reusable.feeAmount.toNumber(),
       };
     }
+    const redirectUrl = resolvePaymentReturnUrl({
+      origin: returnOrigin,
+      clientOrigin: process.env.CLIENT_ORIGIN,
+      configuredRedirectUrl: this.kashier.redirectUrl,
+    });
+    if (!redirectUrl) {
+      throw new ServiceUnavailableException('A valid HTTP(S) payment return URL is not configured');
+    }
     // Unstructured, unguessable merchant reference (Kashier rejects duplicates).
     const providerOrderRef = `topup_${randomUUID().replace(/-/g, '')}`;
     const topUp = await this.prisma.topUp.create({
@@ -142,12 +150,6 @@ export class TopUpsService {
       const account = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
       // Return the payer to the app origin that started the checkout (or the
       // configured app origin), never to an ephemeral tunnel host.
-      const redirectUrl =
-        resolvePaymentReturnUrl({
-          origin: returnOrigin,
-          clientOrigin: process.env.CLIENT_ORIGIN,
-          configuredRedirectUrl: this.kashier.redirectUrl,
-        }) ?? this.kashier.redirectUrl;
       const session = await this.kashier.createSession({
         amount: quote.charge.toFixed(2),
         currency: 'EGP',
