@@ -19,6 +19,15 @@ Set-Location apps/api
 npx prisma migrate dev --name init
 ```
 
+### نسخة محلية بدون Docker (PostgreSQL 18 على المنفذ 5435)
+
+هذا الجهاز يشغّل عنقود PostgreSQL محليًا مستقلًا للمشروع على `localhost:5435`:
+
+- الخدمة: `postgresql-waslny-orders-v2` · مجلد البيانات: `C:\pgdata\waslny_orders_v2` · استماع على `localhost` فقط.
+- القاعدة: `waslny_orders_dev` · المستخدم: `waslny_orders_user` (بلا صلاحيات سوبر).
+- كلمة المرور تُوضع في `apps/api/.env` فقط (ملف غير متتبَّع)، وليس في `.env.example`.
+- العنقود الأقدم على `5434` يبقى كما هو للقراءة فقط ولا يجب تعديله.
+
 ## Start local services
 
 Requirements: Node.js 22+, npm, Flutter stable, and Docker Desktop.
