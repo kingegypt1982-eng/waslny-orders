@@ -117,8 +117,26 @@ void main() {
       await _pumpProfile(tester, api);
 
       expect(find.text('Karim'), findsOneWidget);
-      expect(find.text('k@x.com'), findsNWidgets(2));
+      expect(find.text('k@x.com'), findsOneWidget);
       expect(find.text('عميل'), findsOneWidget);
+    });
+
+    testWidgets('edits name and phone and refreshes the session', (tester) async {
+      final preferences = await _preferences(session: true);
+      final api = _HPApiClient(preferences);
+      await _pumpProfile(tester, api);
+
+      await tester.tap(find.text('بيانات الحساب'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).at(0), 'Updated Name');
+      await tester.enterText(find.byType(TextFormField).at(1), '01000000000');
+      await tester.tap(find.text('حفظ'));
+      await tester.pumpAndSettle();
+
+      expect(api.profileUpdate, {'name': 'Updated Name', 'phone': '01000000000'});
+      expect(find.text('Updated Name'), findsOneWidget);
+      expect(preferences.getString('session_user'), contains('Updated Name'));
+      expect(find.text('تم تحديث بيانات الحساب'), findsOneWidget);
     });
 
     testWidgets('notifications tile opens inbox', (tester) async {
@@ -266,6 +284,8 @@ Future<void> _pumpProfile(WidgetTester tester, _HPApiClient api) async {
 class _HPApiClient extends ApiClient {
   _HPApiClient(super.preferences);
 
+  Map<String, dynamic>? profileUpdate;
+
   static List<Map<String, dynamic>> get all => [
     {
       'id': 'o-search',
@@ -331,5 +351,20 @@ class _HPApiClient extends ApiClient {
       };
     }
     throw StateError('unexpected GET $path');
+  }
+
+  @override
+  Future<Map<String, dynamic>> patch(String path, {Object? data}) async {
+    if (path == '/auth/profile') {
+      profileUpdate = Map<String, dynamic>.from(data! as Map);
+      return {
+        'id': 'u1',
+        'email': 'k@x.com',
+        'name': profileUpdate!['name'],
+        'phone': profileUpdate!['phone'],
+        'role': 'CLIENT',
+      };
+    }
+    throw StateError('unexpected PATCH $path');
   }
 }

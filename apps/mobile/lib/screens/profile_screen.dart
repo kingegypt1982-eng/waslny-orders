@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -83,11 +85,48 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _editProfile(
+    BuildContext context,
+    WidgetRef ref, {
+    required String name,
+    required String phone,
+  }) async {
+    final update = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _EditProfileDialog(name: name, phone: phone),
+    );
+    if (update == null || !context.mounted) return;
+
+    try {
+      final user = await ref
+          .read(apiClientProvider)
+          .patch('/auth/profile', data: update);
+      final current = ref.read(sessionProvider) ?? {};
+      final updated = {...current, ...user};
+      await ref
+          .read(preferencesProvider)
+          .setString('session_user', jsonEncode(updated));
+      ref.read(sessionProvider.notifier).state = updated;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم تحديث بيانات الحساب')),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ApiClient.errorMessage(error))),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(sessionProvider) ?? {};
     final name = user['name']?.toString() ?? '';
     final email = user['email']?.toString() ?? '';
+    final phone = user['phone']?.toString() ?? '';
     final role = switch (user['role']?.toString()) {
       'CAPTAIN' => 'مندوب',
       'ADMIN' => 'مدير',
@@ -156,8 +195,13 @@ class ProfileScreen extends ConsumerWidget {
               _PTile(
                 icon: Icons.person_outline_rounded,
                 title: 'بيانات الحساب',
-                subtitle: email.isEmpty ? '—' : email,
-                onTap: null,
+                subtitle: phone.isEmpty ? 'أضف رقم الهاتف' : phone,
+                onTap: () => _editProfile(
+                  context,
+                  ref,
+                  name: name,
+                  phone: phone,
+                ),
               ),
               const SizedBox(height: 10),
               _PTile(
@@ -206,6 +250,75 @@ class ProfileScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _EditProfileDialog extends StatefulWidget {
+  const _EditProfileDialog({required this.name, required this.phone});
+
+  final String name;
+  final String phone;
+
+  @override
+  State<_EditProfileDialog> createState() => _EditProfileDialogState();
+}
+
+class _EditProfileDialogState extends State<_EditProfileDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final _nameController = TextEditingController(text: widget.name);
+  late final _phoneController = TextEditingController(text: widget.phone);
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    backgroundColor: _pCard,
+    title: const Text(
+      'تعديل بيانات الحساب',
+      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+    ),
+    content: Form(
+      key: _formKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextFormField(
+            controller: _nameController,
+            decoration: const InputDecoration(labelText: 'الاسم'),
+            validator: (value) => (value?.trim().length ?? 0) < 2
+                ? 'اكتب اسمًا من حرفين على الأقل'
+                : null,
+          ),
+          TextFormField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(labelText: 'رقم الهاتف'),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('إلغاء'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (!_formKey.currentState!.validate()) return;
+          final phone = _phoneController.text.trim();
+          Navigator.pop(context, {
+            'name': _nameController.text.trim(),
+            'phone': phone.isEmpty ? null : phone,
+          });
+        },
+        child: const Text('حفظ'),
+      ),
+    ],
+  );
 }
 
 class _PTile extends StatelessWidget {
