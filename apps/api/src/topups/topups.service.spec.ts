@@ -67,7 +67,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     kashier as unknown as KashierClient,
   );
 
-  const ENV_KEYS = ['CLIENT_ORIGIN', 'CORS_ORIGINS'] as const;
+  const ENV_KEYS = ['CLIENT_ORIGIN', 'CORS_ORIGINS', 'NODE_ENV'] as const;
   const savedEnv: Record<string, string | undefined> = {};
 
   beforeAll(() => {
@@ -170,6 +170,34 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     });
     expect(prisma.topUp.create).not.toHaveBeenCalled();
     expect(kashier.createSession).not.toHaveBeenCalled();
+  });
+
+  it('simulates a development success only once for a pending top-up', async () => {
+    process.env.NODE_ENV = 'development';
+    prisma.topUp.findUnique
+      .mockResolvedValueOnce({ ...pendingTopUp })
+      .mockResolvedValueOnce({ ...pendingTopUp, status: 'SUCCEEDED' });
+    tx.topUp.updateMany.mockResolvedValue({ count: 1 });
+
+    const first = await service.simulateDevelopmentSuccess('cap1', 't1');
+    const replay = await service.simulateDevelopmentSuccess('cap1', 't1');
+
+    expect(first).toEqual({ status: 'SUCCEEDED', credited: true });
+    expect(replay).toEqual({ status: 'SUCCEEDED', credited: false });
+    expect(tx.wallet.update).toHaveBeenCalledTimes(1);
+    expect(tx.walletTransaction.create).toHaveBeenCalledTimes(1);
+    expect(tx.topUp.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ providerTransactionId: 'development_t1' }),
+    }));
+  });
+
+  it('disables development top-up simulation in production', async () => {
+    process.env.NODE_ENV = 'production';
+
+    await expect(service.simulateDevelopmentSuccess('cap1', 't1')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.topUp.findUnique).not.toHaveBeenCalled();
   });
 
   it('rejects amounts outside the admin-configured limits', async () => {

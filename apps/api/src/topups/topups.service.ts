@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ConflictException,
   ServiceUnavailableException,
   UnauthorizedException,
   UnprocessableEntityException,
@@ -188,6 +189,29 @@ export class TopUpsService {
     const topUp = await this.prisma.topUp.findUnique({ where: { id } });
     if (!topUp || topUp.userId !== userId) throw new ForbiddenException();
     return topUp;
+  }
+
+  async simulateDevelopmentSuccess(userId: string, id: string) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Development top-up simulation is disabled');
+    }
+    const topUp = await this.prisma.topUp.findUnique({ where: { id } });
+    if (!topUp || topUp.userId !== userId) throw new ForbiddenException();
+    if (topUp.status === TopUpStatus.SUCCEEDED) {
+      return { status: topUp.status, credited: false };
+    }
+    if (topUp.status !== TopUpStatus.PENDING) {
+      throw new ConflictException('Only pending top-ups can be simulated');
+    }
+
+    const outcome = await this.prisma.$transaction((tx) =>
+      this.claimAndCredit(tx, topUp, `development_${topUp.id}`),
+    );
+    if (outcome === 'duplicate') {
+      const current = await this.prisma.topUp.findUnique({ where: { id } });
+      return { status: current?.status ?? topUp.status, credited: false };
+    }
+    return { status: TopUpStatus.SUCCEEDED, credited: true };
   }
 
   adminTopUps(query: AdminTopUpsQueryDto) {

@@ -25,6 +25,12 @@ export class TopUpsController {
     return this.topUps.createTopUp(user.id, body.amount, origin);
   }
 
+  @Post('topups/:id/development-success')
+  @Roles('CAPTAIN')
+  simulateDevelopmentSuccess(@CurrentUser() user: { id: string }, @Param('id') id: string) {
+    return this.topUps.simulateDevelopmentSuccess(user.id, id);
+  }
+
   @Get('topups')
   @Roles('CAPTAIN')
   list(@CurrentUser() user: { id: string }, @Query('take') take?: string, @Query('skip') skip?: string) {
