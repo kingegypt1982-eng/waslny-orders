@@ -194,7 +194,7 @@ export class TopUpsService {
   }
 
   async simulateDevelopmentSuccess(userId: string, id: string) {
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV !== 'development') {
       throw new ForbiddenException('Development top-up simulation is disabled');
     }
     const topUp = await this.prisma.topUp.findUnique({ where: { id } });

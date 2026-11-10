@@ -203,14 +203,17 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     }));
   });
 
-  it('disables development top-up simulation in production', async () => {
-    process.env.NODE_ENV = 'production';
+  it.each([undefined, 'test', 'production'])(
+    'disables development top-up simulation when NODE_ENV is %s',
+    async (nodeEnv) => {
+      if (nodeEnv) process.env.NODE_ENV = nodeEnv;
 
-    await expect(service.simulateDevelopmentSuccess('cap1', 't1')).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-    expect(prisma.topUp.findUnique).not.toHaveBeenCalled();
-  });
+      await expect(service.simulateDevelopmentSuccess('cap1', 't1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.topUp.findUnique).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects amounts outside the admin-configured limits', async () => {
     prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
