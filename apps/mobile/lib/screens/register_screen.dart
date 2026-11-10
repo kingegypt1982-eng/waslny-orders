@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/api_client.dart';
 import '../core/google_auth.dart';
+import '../core/texts.dart';
 
 enum AccountType { client, captain }
 
@@ -28,7 +29,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   late AccountType _accountType;
   bool _hidePassword = true;
   bool _isLoading = false;
-  bool _isArabic = false;
+  bool _isArabic = true;
   bool _termsAccepted = false;
   Map<String, dynamic>? _termsPolicy;
 
@@ -44,6 +45,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   void initState() {
     super.initState();
     _accountType = widget.initialRole;
+    _isArabic = deviceIsArabic();
     _loadTermsPolicy();
   }
 
@@ -360,8 +362,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       ),
                     ),
                     TextButton(
-                      onPressed: () {
-                        setState(() => _isArabic = !_isArabic);
+                      onPressed: () async {
+                        final next = !_isArabic;
+                        await setAppLanguage(
+                          ref.read(preferencesProvider),
+                          next ? 'ar' : 'en',
+                        );
+                        if (mounted) setState(() => _isArabic = next);
                       },
                       child: Text(_isArabic ? 'English' : 'العربية'),
                     ),

@@ -1,10 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+final appLanguage = ValueNotifier<String>('ar');
 
 /// Shared UI texts.
 ///
 /// The raw API enums (e.g. `SPARE_PARTS`) must never reach the screen: every
 /// category goes through [categoryLabel] and every bottom-navigation label
-/// through [homeTabLabels], which follows the device language.
+/// through [homeTabLabels], which follows the saved app language.
 ///
 /// Note: this file is the mobile-side source of truth for those labels; the
 /// same mapping is currently duplicated inline in the trip and order-review
@@ -26,14 +30,16 @@ String categoryLabel(Object? category) => switch (category) {
   _ => 'شحنة',
 };
 
-/// Whether the device's preferred language is Arabic.
-///
-/// Read straight from the platform dispatcher so it works without adding
-/// `flutter_localizations` / `supportedLocales` to the app.
-bool deviceIsArabic() =>
-    WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'ar';
+/// Whether the app's saved language preference is Arabic.
+bool deviceIsArabic() => appLanguage.value == 'ar';
 
-/// Bottom-navigation labels for the current role, in the device language.
+Future<void> setAppLanguage(SharedPreferences preferences, String value) async {
+  final language = value == 'en' ? 'en' : 'ar';
+  appLanguage.value = language;
+  await preferences.setString('app_language', language);
+}
+
+/// Bottom-navigation labels for the current role, in the saved app language.
 List<String> homeTabLabels({required bool captain}) {
   final arabic = deviceIsArabic();
   if (captain) {
@@ -46,7 +52,7 @@ List<String> homeTabLabels({required bool captain}) {
       : const ['Home', 'Orders', 'Profile'];
 }
 
-/// Picks the Arabic text on an Arabic device and the English one otherwise.
+/// Picks Arabic or English based on the saved app language.
 ///
 /// Lightweight stand-in for full localisation (the app has no
 /// `flutter_localizations` setup yet) so every string has a single source.

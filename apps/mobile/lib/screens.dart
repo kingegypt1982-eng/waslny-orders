@@ -1094,7 +1094,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   String? _loadError;
   int _step = 0;
   bool _submitting = false;
-  bool _isArabic = false;
+  bool _isArabic = true;
   String? _governorate;
   String? _colorChoice;
   NationalIdValidation? _nationalIdResult;
@@ -1104,8 +1104,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
   @override
   void initState() {
     super.initState();
-    _isArabic =
-        ref.read(preferencesProvider).getString('captain_docs_language') == 'ar';
+    _isArabic = deviceIsArabic();
     _load();
   }
 
@@ -1673,9 +1672,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
           TextButton(
             onPressed: () {
               final next = !_isArabic;
-              ref
-                  .read(preferencesProvider)
-                  .setString('captain_docs_language', next ? 'ar' : 'en');
+              setAppLanguage(ref.read(preferencesProvider), next ? 'ar' : 'en');
               setState(() => _isArabic = next);
             },
             child: Text(_isArabic ? 'English' : 'العربية'),

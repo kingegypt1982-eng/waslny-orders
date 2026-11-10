@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api_client.dart';
+import '../core/texts.dart';
 
 const _pBg = Color(0xFF03151D);
 const _pCard = Color(0xFF092630);
@@ -21,23 +22,29 @@ class ProfileScreen extends ConsumerWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: _pCard,
-        title: const Text(
-          'تسجيل الخروج؟',
+        title: Text(
+          tr(ar: 'تسجيل الخروج؟', en: 'Sign out?'),
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
         ),
-        content: const Text(
-          'هل تريد تسجيل الخروج من حسابك؟',
+        content: Text(
+          tr(
+            ar: 'هل تريد تسجيل الخروج من حسابك؟',
+            en: 'Sign out of your account?',
+          ),
           style: TextStyle(color: _pMuted),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('رجوع', style: TextStyle(color: _pMuted)),
+            child: Text(
+              tr(ar: 'رجوع', en: 'Cancel'),
+              style: const TextStyle(color: _pMuted),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: _pGreen),
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('تسجيل الخروج'),
+            child: Text(tr(ar: 'تسجيل الخروج', en: 'Sign out')),
           ),
         ],
       ),
@@ -53,19 +60,22 @@ class ProfileScreen extends ConsumerWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: _pCard,
-        title: const Text(
-          'المساعدة والدعم',
+        title: Text(
+          tr(ar: 'المساعدة والدعم', en: 'Help and support'),
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
         ),
-        content: const Text(
-          'للاستفسارات والدعم الفني تواصل معنا على support@waslny.com وسنرد عليك في أقرب وقت.',
+        content: Text(
+          tr(
+            ar: 'للاستفسارات والدعم الفني تواصل معنا على support@waslny.com وسنرد عليك في أقرب وقت.',
+            en: 'For help, contact support@waslny.com and we will get back to you soon.',
+          ),
           style: TextStyle(color: _pMuted, height: 1.6),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text(
-              'حسنًا',
+            child: Text(
+              tr(ar: 'حسنًا', en: 'OK'),
               style: TextStyle(color: _pGreen, fontWeight: FontWeight.w700),
             ),
           ),
@@ -109,14 +119,18 @@ class ProfileScreen extends ConsumerWidget {
       ref.read(sessionProvider.notifier).state = updated;
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم تحديث بيانات الحساب')),
+          SnackBar(
+            content: Text(
+              tr(ar: 'تم تحديث بيانات الحساب', en: 'Account details updated'),
+            ),
+          ),
         );
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ApiClient.errorMessage(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(ApiClient.errorMessage(error))));
       }
     }
   }
@@ -127,13 +141,14 @@ class ProfileScreen extends ConsumerWidget {
     final name = user['name']?.toString() ?? '';
     final email = user['email']?.toString() ?? '';
     final phone = user['phone']?.toString() ?? '';
+    final isArabic = deviceIsArabic();
     final role = switch (user['role']?.toString()) {
-      'CAPTAIN' => 'مندوب',
-      'ADMIN' => 'مدير',
-      _ => 'عميل',
+      'CAPTAIN' => tr(ar: 'مندوب', en: 'Captain'),
+      'ADMIN' => tr(ar: 'مدير', en: 'Admin'),
+      _ => tr(ar: 'عميل', en: 'Customer'),
     };
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: _pBg,
         body: SafeArea(
@@ -194,35 +209,62 @@ class ProfileScreen extends ConsumerWidget {
               const SizedBox(height: 22),
               _PTile(
                 icon: Icons.person_outline_rounded,
-                title: 'بيانات الحساب',
-                subtitle: phone.isEmpty ? 'أضف رقم الهاتف' : phone,
-                onTap: () => _editProfile(
-                  context,
-                  ref,
-                  name: name,
-                  phone: phone,
-                ),
+                title: tr(ar: 'بيانات الحساب', en: 'Account details'),
+                subtitle: phone.isEmpty
+                    ? tr(ar: 'أضف رقم الهاتف', en: 'Add a phone number')
+                    : phone,
+                onTap: () =>
+                    _editProfile(context, ref, name: name, phone: phone),
               ),
               const SizedBox(height: 10),
               _PTile(
                 icon: Icons.notifications_none_rounded,
-                title: 'الإشعارات',
-                subtitle: 'عرض تحديثات طلباتك',
+                title: tr(ar: 'الإشعارات', en: 'Notifications'),
+                subtitle: tr(
+                  ar: 'عرض تحديثات طلباتك',
+                  en: 'View order updates',
+                ),
                 onTap: () => context.push('/notifications'),
               ),
               const SizedBox(height: 10),
               _PTile(
                 icon: Icons.description_outlined,
-                title: 'السياسات والشروط',
-                subtitle: 'اطلع على الشروط والأحكام',
+                title: tr(ar: 'السياسات والشروط', en: 'Policies and terms'),
+                subtitle: tr(
+                  ar: 'اطلع على الشروط والأحكام',
+                  en: 'Read the terms and conditions',
+                ),
                 onTap: () => _showPolicy(context),
               ),
               const SizedBox(height: 10),
               _PTile(
                 icon: Icons.help_outline_rounded,
-                title: 'المساعدة والدعم',
-                subtitle: 'تواصل معنا',
+                title: tr(ar: 'المساعدة والدعم', en: 'Help and support'),
+                subtitle: tr(ar: 'تواصل معنا', en: 'Contact us'),
                 onTap: () => _showHelp(context),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                tr(ar: 'اللغة', en: 'Language'),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ValueListenableBuilder<String>(
+                valueListenable: appLanguage,
+                builder: (context, language, _) => SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'ar', label: Text('العربية')),
+                    ButtonSegment(value: 'en', label: Text('English')),
+                  ],
+                  selected: {language},
+                  onSelectionChanged: (selection) => setAppLanguage(
+                    ref.read(preferencesProvider),
+                    selection.first,
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
               SizedBox(
@@ -238,8 +280,8 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                   ),
                   icon: const Icon(Icons.logout_rounded),
-                  label: const Text(
-                    'تسجيل الخروج',
+                  label: Text(
+                    tr(ar: 'تسجيل الخروج', en: 'Sign out'),
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
@@ -277,8 +319,8 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
     backgroundColor: _pCard,
-    title: const Text(
-      'تعديل بيانات الحساب',
+    title: Text(
+      tr(ar: 'تعديل بيانات الحساب', en: 'Edit account details'),
       style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
     ),
     content: Form(
@@ -288,15 +330,22 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
         children: [
           TextFormField(
             controller: _nameController,
-            decoration: const InputDecoration(labelText: 'الاسم'),
+            decoration: InputDecoration(
+              labelText: tr(ar: 'الاسم', en: 'Name'),
+            ),
             validator: (value) => (value?.trim().length ?? 0) < 2
-                ? 'اكتب اسمًا من حرفين على الأقل'
+                ? tr(
+                    ar: 'اكتب اسمًا من حرفين على الأقل',
+                    en: 'Enter at least 2 characters',
+                  )
                 : null,
           ),
           TextFormField(
             controller: _phoneController,
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(labelText: 'رقم الهاتف'),
+            decoration: InputDecoration(
+              labelText: tr(ar: 'رقم الهاتف', en: 'Phone number'),
+            ),
           ),
         ],
       ),
@@ -304,7 +353,7 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('إلغاء'),
+        child: Text(tr(ar: 'إلغاء', en: 'Cancel')),
       ),
       FilledButton(
         onPressed: () {
@@ -315,7 +364,7 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
             'phone': phone.isEmpty ? null : phone,
           });
         },
-        child: const Text('حفظ'),
+        child: Text(tr(ar: 'حفظ', en: 'Save')),
       ),
     ],
   );
@@ -380,8 +429,10 @@ class _PTile extends StatelessWidget {
               ),
             ),
             if (onTap != null)
-              const Icon(
-                Icons.arrow_back_ios_new_rounded,
+              Icon(
+                deviceIsArabic()
+                    ? Icons.arrow_back_ios_new_rounded
+                    : Icons.arrow_forward_ios_rounded,
                 color: _pMuted,
                 size: 16,
               ),

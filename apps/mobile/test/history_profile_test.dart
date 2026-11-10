@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/api_client.dart';
+import 'package:wasalny_orders/core/texts.dart';
 import 'package:wasalny_orders/screens.dart';
 import 'package:wasalny_orders/screens/history_screen.dart';
 import 'package:wasalny_orders/screens/profile_screen.dart';
@@ -121,7 +122,43 @@ void main() {
       expect(find.text('عميل'), findsOneWidget);
     });
 
-    testWidgets('edits name and phone and refreshes the session', (tester) async {
+    testWidgets('profile language control saves the selected language', (
+      tester,
+    ) async {
+      final preferences = await _preferences(session: true);
+      final api = _HPApiClient(preferences);
+      appLanguage.value = 'ar';
+      addTearDown(() => appLanguage.value = 'ar');
+      await _pumpProfile(tester, api);
+
+      expect(
+        tester
+            .widget<SegmentedButton<String>>(
+              find.byType(SegmentedButton<String>),
+            )
+            .selected,
+        {'ar'},
+      );
+      await tester.scrollUntilVisible(find.text('English'), 200);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('English'));
+      await tester.pump();
+
+      expect(appLanguage.value, 'en');
+      expect(preferences.getString('app_language'), 'en');
+      expect(
+        tester
+            .widget<SegmentedButton<String>>(
+              find.byType(SegmentedButton<String>),
+            )
+            .selected,
+        {'en'},
+      );
+    });
+
+    testWidgets('edits name and phone and refreshes the session', (
+      tester,
+    ) async {
       final preferences = await _preferences(session: true);
       final api = _HPApiClient(preferences);
       await _pumpProfile(tester, api);
@@ -133,7 +170,10 @@ void main() {
       await tester.tap(find.text('حفظ'));
       await tester.pumpAndSettle();
 
-      expect(api.profileUpdate, {'name': 'Updated Name', 'phone': '01000000000'});
+      expect(api.profileUpdate, {
+        'name': 'Updated Name',
+        'phone': '01000000000',
+      });
       expect(find.text('Updated Name'), findsOneWidget);
       expect(preferences.getString('session_user'), contains('Updated Name'));
       expect(find.text('تم تحديث بيانات الحساب'), findsOneWidget);

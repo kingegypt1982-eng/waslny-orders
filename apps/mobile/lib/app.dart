@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
+import 'core/texts.dart';
 import 'screens.dart';
 import 'screens/captain_availability_screen.dart';
 import 'screens/captain_start_screen.dart';
@@ -20,6 +21,9 @@ import 'screens/splash_screen.dart';
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   final preferences = await SharedPreferences.getInstance();
+  appLanguage.value = preferences.getString('app_language') == 'en'
+      ? 'en'
+      : 'ar';
   var messagingReady = false;
   try {
     await Firebase.initializeApp();
@@ -141,39 +145,48 @@ class WasalnyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
-    return MaterialApp.router(
-      title: 'Wasalny Orders',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF19785F),
-          surface: const Color(0xFFF7F8F5),
+    return ValueListenableBuilder<String>(
+      valueListenable: appLanguage,
+      builder: (context, language, _) => MaterialApp.router(
+        title: 'Wasalny Orders',
+        debugShowCheckedModeBanner: false,
+        builder: (context, child) => Directionality(
+          textDirection: language == 'ar'
+              ? TextDirection.rtl
+              : TextDirection.ltr,
+          child: child ?? const SizedBox.shrink(),
         ),
-        scaffoldBackgroundColor: const Color(0xFFF7F8F5),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF7F8F5),
-          foregroundColor: Color(0xFF22342B),
-          elevation: 0,
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF19785F),
+            surface: const Color(0xFFF7F8F5),
+          ),
+          scaffoldBackgroundColor: const Color(0xFFF7F8F5),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFFF7F8F5),
+            foregroundColor: Color(0xFF22342B),
+            elevation: 0,
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(9),
+              borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(9),
+              borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 13,
+            ),
+          ),
         ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(9),
-            borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(9),
-            borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 13,
-          ),
-        ),
+        routerConfig: router,
       ),
-      routerConfig: router,
     );
   }
 }

@@ -6,10 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/api_client.dart';
+import 'package:wasalny_orders/core/texts.dart';
 import 'package:wasalny_orders/core/url_opener.dart';
 import 'package:wasalny_orders/screens.dart' show WalletScreen;
 
 void main() {
+  setUp(() => appLanguage.value = 'en');
+
   testWidgets('captain wallet renders Decimal strings without a type error', (
     tester,
   ) async {
@@ -181,9 +184,11 @@ void main() {
     expect(find.textContaining('expired'), findsNothing);
   });
 
-  testWidgets('the wallet is fully Arabic on an Arabic device', (tester) async {
-    tester.platformDispatcher.localeTestValue = const Locale('ar');
-    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+  testWidgets('the wallet is fully Arabic when the app language is Arabic', (
+    tester,
+  ) async {
+    appLanguage.value = 'ar';
+    addTearDown(() => appLanguage.value = 'en');
     final api = _WalletApi(await _preferences());
     await tester.pumpWidget(_app(api));
     await tester.pump();
@@ -209,11 +214,11 @@ void main() {
     expect(find.text('Captain wallet'), findsNothing);
   });
 
-  testWidgets('the top-up summary is Arabic on an Arabic device', (
+  testWidgets('the top-up summary is Arabic when the app language is Arabic', (
     tester,
   ) async {
-    tester.platformDispatcher.localeTestValue = const Locale('ar');
-    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    appLanguage.value = 'ar';
+    addTearDown(() => appLanguage.value = 'en');
     final api = _WalletApi(await _preferences());
     await tester.pumpWidget(_app(api));
     await tester.pump();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/texts.dart';
 import 'notifications_screen.dart';
 
 class WaslnyHomeScreen extends StatefulWidget {
@@ -31,42 +32,49 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
   final List<Map<String, dynamic>> parcelTypes = [
     {
       'title': 'مشتريات',
+      'titleEn': 'Purchases',
       'category': 'PURCHASES',
       'icon': Icons.shopping_bag_rounded,
       'color': Color(0xFF269BFF),
     },
     {
       'title': 'طعام ومشروبات',
+      'titleEn': 'Food and drinks',
       'category': 'FOOD',
       'icon': Icons.lunch_dining_rounded,
       'color': Color(0xFFFFA72B),
     },
     {
       'title': 'طرود وطلبات',
+      'titleEn': 'Packages and orders',
       'category': 'PACKAGE',
       'icon': Icons.inventory_2_rounded,
       'color': Color(0xFFFFB45A),
     },
     {
       'title': 'مستندات وأوراق',
+      'titleEn': 'Documents and papers',
       'category': 'PAPERS',
       'icon': Icons.description_rounded,
       'color': Color(0xFF8ECFFF),
     },
     {
       'title': 'أدوية',
+      'titleEn': 'Medicines',
       'category': 'MEDICINES',
       'icon': Icons.medical_services_rounded,
       'color': Color(0xFF55E2BC),
     },
     {
       'title': 'إلكترونيات',
+      'titleEn': 'Electronics',
       'category': 'ELECTRONICS',
       'icon': Icons.devices_rounded,
       'color': Color(0xFF7FA8FF),
     },
     {
       'title': 'هدايا',
+      'titleEn': 'Gifts',
       'category': 'GOODS',
       'icon': Icons.card_giftcard_rounded,
       'color': Color(0xFFFF697C),
@@ -102,17 +110,31 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
         final order = activeOrders.single as Map;
         final orderId = order['id']?.toString();
         if (orderId == null || orderId.isEmpty) {
-          showMessage('تعذر تحميل الطلبات الآن');
+          showMessage(
+            tr(
+              ar: 'تعذر تحميل الطلبات الآن',
+              en: 'Could not load orders right now',
+            ),
+          );
         } else {
           context.push('/track/$orderId');
         }
       } else if (activeOrders.length > 1) {
         widget.onNavigate(1);
       } else {
-        showMessage('لا توجد طلبات جارية الآن');
+        showMessage(
+          tr(ar: 'لا توجد طلبات جارية الآن', en: 'There are no active orders'),
+        );
       }
     } catch (_) {
-      if (mounted) showMessage('تعذر تحميل الطلبات الآن');
+      if (mounted) {
+        showMessage(
+          tr(
+            ar: 'تعذر تحميل الطلبات الآن',
+            en: 'Could not load orders right now',
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loadingOrders = false);
     }
@@ -121,7 +143,7 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: deviceIsArabic() ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: bg,
         body: SafeArea(
@@ -136,7 +158,9 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                     buildHeroBanner(),
                     const SizedBox(height: 18),
                     const SizedBox(height: 23),
-                    buildSectionTitle('اختر نوع الطرد'),
+                    buildSectionTitle(
+                      tr(ar: 'اختر نوع الطرد', en: 'Choose a delivery type'),
+                    ),
                     const SizedBox(height: 13),
                     buildParcelGrid(),
                     const SizedBox(height: 20),
@@ -165,7 +189,7 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
           child: const Icon(Icons.location_on_rounded, color: green, size: 32),
         ),
         const SizedBox(width: 11),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -180,7 +204,7 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
               ),
               SizedBox(height: 4),
               Text(
-                'Orders',
+                tr(ar: 'طلبات', en: 'Orders'),
                 style: TextStyle(
                   fontSize: 16,
                   color: green,
@@ -251,8 +275,8 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'كل احتياجاتك',
+                Text(
+                  tr(ar: 'كل احتياجاتك', en: 'Everything you need'),
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 25,
@@ -260,8 +284,8 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 2),
-                const Text(
-                  'في مكان واحد',
+                Text(
+                  tr(ar: 'في مكان واحد', en: 'in one place'),
                   style: TextStyle(
                     color: green,
                     fontSize: 29,
@@ -269,8 +293,11 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                const Text(
-                  'اطلب مندوب الآن واستلم طلبك\nمن مكانك إلى وجهتك.',
+                Text(
+                  tr(
+                    ar: 'اطلب مندوب الآن واستلم طلبك\nمن مكانك إلى وجهتك.',
+                    en: 'Request a captain and get your order delivered\nfrom pickup to destination.',
+                  ),
                   style: TextStyle(
                     color: Color(0xFFD0E0E0),
                     fontSize: 13,
@@ -289,13 +316,13 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       shape: const StadiumBorder(),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.arrow_forward_rounded, size: 20),
                         SizedBox(width: 9),
                         Text(
-                          'اطلب مندوب',
+                          tr(ar: 'اطلب مندوب', en: 'Request a captain'),
                           style: TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 15,
@@ -389,7 +416,8 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            item['title'] as String,
+                            item[deviceIsArabic() ? 'title' : 'titleEn']
+                                as String,
                             textAlign: TextAlign.center,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -443,12 +471,12 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                 ),
               ),
               const SizedBox(width: 13),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'أمان في التوصيل',
+                      tr(ar: 'أمان في التوصيل', en: 'Safe delivery'),
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 15,
@@ -457,7 +485,10 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                     ),
                     SizedBox(height: 6),
                     Text(
-                      'تابع طلبك من الاستلام حتى التسليم',
+                      tr(
+                        ar: 'تابع طلبك من الاستلام حتى التسليم',
+                        en: 'Track your order from pickup to delivery',
+                      ),
                       style: TextStyle(color: muted, fontSize: 11),
                     ),
                   ],

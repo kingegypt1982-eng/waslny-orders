@@ -16,11 +16,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:wasalny_orders/app.dart';
 import 'package:wasalny_orders/core/api_client.dart';
+import 'package:wasalny_orders/core/texts.dart';
 import 'package:wasalny_orders/screens/home_screen.dart';
 import 'package:wasalny_orders/screens/register_screen.dart';
 import 'package:wasalny_orders/screens.dart';
 
 void main() {
+  setUp(() => appLanguage.value = 'en');
+
   testWidgets('choosing client opens registration with client role', (
     tester,
   ) async {
@@ -71,9 +74,22 @@ void main() {
   testWidgets('registration switches languages and text direction', (
     tester,
   ) async {
+    appLanguage.value = 'en';
+    addTearDown(() => appLanguage.value = 'ar');
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
     await tester.pumpWidget(
-      const MaterialApp(home: RegisterScreen(initialRole: AccountType.captain)),
+      ProviderScope(
+        overrides: [
+          preferencesProvider.overrideWithValue(preferences),
+          apiClientProvider.overrideWithValue(_TestApiClient(preferences)),
+        ],
+        child: const MaterialApp(
+          home: RegisterScreen(initialRole: AccountType.captain),
+        ),
+      ),
     );
+    await tester.pumpAndSettle();
 
     expect(find.text('Join Wasalny'), findsOneWidget);
     expect(find.text('Captain'), findsOneWidget);
@@ -249,10 +265,7 @@ void main() {
   });
 
   testWidgets('client registration routes to the home screen', (tester) async {
-    // The bottom navigation follows the device language; pin Arabic so the
-    // labels under test are the ones shown.
-    tester.platformDispatcher.localeTestValue = const Locale('ar');
-    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    appLanguage.value = 'en';
     SharedPreferences.setMockInitialValues({});
     final preferences = await SharedPreferences.getInstance();
     final api = _TestApiClient(preferences, role: 'CLIENT');
@@ -289,23 +302,28 @@ void main() {
     expect(router.routeInformationProvider.value.uri.path, '/');
     expect(container.read(sessionProvider)?['role'], 'CLIENT');
     expect(find.byType(WaslnyHomeScreen), findsOneWidget);
-    expect(find.text('كل احتياجاتك'), findsOneWidget);
+    expect(find.text('Everything you need'), findsOneWidget);
 
-    await tester.tap(find.text('طلباتي'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Orders'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       1,
     );
 
-    await tester.tap(find.text('الملف'));
+    await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       2,
     );
 
-    await tester.tap(find.text('الرئيسية'));
+    await tester.tap(find.text('Home'));
     await tester.pumpAndSettle();
     expect(find.byType(WaslnyHomeScreen), findsOneWidget);
 
@@ -430,6 +448,8 @@ void main() {
   testWidgets('home category opens new order with its category extra', (
     tester,
   ) async {
+    appLanguage.value = 'ar';
+    addTearDown(() => appLanguage.value = 'en');
     final router = GoRouter(
       initialLocation: '/',
       routes: [
@@ -473,6 +493,8 @@ void main() {
   testWidgets('safety card opens one active order or routes to order history', (
     tester,
   ) async {
+    appLanguage.value = 'ar';
+    addTearDown(() => appLanguage.value = 'en');
     var response = <dynamic>[];
     var shouldFail = false;
     var selectedTab = -1;
@@ -566,6 +588,8 @@ void main() {
   });
 
   testWidgets('new order form is fully Arabic RTL', (tester) async {
+    appLanguage.value = 'ar';
+    addTearDown(() => appLanguage.value = 'en');
     await tester.pumpWidget(
       const ProviderScope(child: MaterialApp(home: CreateOrderScreen())),
     );

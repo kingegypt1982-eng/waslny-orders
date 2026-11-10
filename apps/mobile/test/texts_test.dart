@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/texts.dart';
 
 void main() {
@@ -14,20 +15,15 @@ void main() {
     expect(categoryLabel('SOMETHING_NEW'), 'شحنة');
   });
 
-  testWidgets('bottom navigation follows the device language', (tester) async {
+  testWidgets('Arabic is the default and app language preference persists', (
+    tester,
+  ) async {
     tester.platformDispatcher.localeTestValue = const Locale('en');
     addTearDown(tester.platformDispatcher.clearLocaleTestValue);
-
-    expect(homeTabLabels(captain: true), [
-      'Home',
-      'Trips',
-      'Wallet',
-      'Profile',
-    ]);
-    expect(homeTabLabels(captain: false), ['Home', 'Orders', 'Profile']);
-
-    tester.platformDispatcher.localeTestValue = const Locale('ar');
-    await tester.pump();
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    appLanguage.value = 'ar';
+    addTearDown(() => appLanguage.value = 'ar');
 
     expect(homeTabLabels(captain: true), [
       'الرئيسية',
@@ -36,11 +32,26 @@ void main() {
       'الملف',
     ]);
     expect(homeTabLabels(captain: false), ['الرئيسية', 'طلباتي', 'الملف']);
+
+    await setAppLanguage(preferences, 'en');
+
+    expect(homeTabLabels(captain: true), [
+      'Home',
+      'Trips',
+      'Wallet',
+      'Profile',
+    ]);
+    expect(homeTabLabels(captain: false), ['Home', 'Orders', 'Profile']);
+    expect(preferences.getString('app_language'), 'en');
   });
 
-  testWidgets('wallet labels follow the device language', (tester) async {
+  testWidgets('wallet labels follow the in-app language', (tester) async {
     tester.platformDispatcher.localeTestValue = const Locale('en');
     addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    appLanguage.value = 'en';
+    addTearDown(() => appLanguage.value = 'ar');
 
     expect(tr(ar: 'محفظة', en: 'Wallet'), 'Wallet');
     expect(currencyLabel(), 'EGP');
@@ -48,8 +59,7 @@ void main() {
     expect(walletTransactionLabel('TOP_UP'), 'TOP UP');
     expect(walletTransactionLabel('ORDER_COMMISSION'), 'ORDER COMMISSION');
 
-    tester.platformDispatcher.localeTestValue = const Locale('ar');
-    await tester.pump();
+    await setAppLanguage(preferences, 'ar');
 
     expect(tr(ar: 'محفظة المندوب', en: 'Captain wallet'), 'محفظة المندوب');
     expect(currencyLabel(), 'ج.م');
