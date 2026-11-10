@@ -67,6 +67,30 @@ describe('AuthService', () => {
     expect(result.user.role).toBe('CLIENT');
   });
 
+  it.each(['CAPTAIN', 'ADMIN'] as const)(
+    'logs in with email + password for %s accounts',
+    async (role) => {
+      const email = `${role.toLowerCase()}@waslny.com`;
+      prisma.user.findUnique.mockResolvedValue({
+        id: `${role.toLowerCase()}-1`,
+        email,
+        name: `${role} User`,
+        role,
+        suspendedAt: null,
+        passwordHash: await bcrypt.hash('RoleLogin123', 4),
+      });
+
+      const result = await service.login({ email, password: 'RoleLogin123' });
+
+      expect(result.user.role).toBe(role);
+      expect(result.accessToken).toBe('signed-token');
+      expect(jwt.signAsync).toHaveBeenCalledWith({
+        sub: `${role.toLowerCase()}-1`,
+        role,
+      });
+    },
+  );
+
   it('rejects wrong passwords and suspended accounts', async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'u2',
