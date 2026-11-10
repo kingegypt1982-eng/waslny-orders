@@ -11,6 +11,7 @@ import { CaptainStatus, Prisma, TopUpStatus, WalletTransactionType } from '@pris
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { KashierClient } from './kashier.client';
+import { resolvePaymentReturnUrl } from './payment-return-url';
 import { computeTopUpCharge } from './topup-pricing';
 import { AdminTopUpsQueryDto } from './dto/admin-topups-query.dto';
 
@@ -81,7 +82,7 @@ export class TopUpsService {
     });
   }
 
-  async createTopUp(userId: string, amount: number) {
+  async createTopUp(userId: string, amount: number, returnOrigin?: string) {
     const profile = await this.prisma.captainProfile.findUnique({ where: { userId } });
     if (!profile || profile.status !== CaptainStatus.ACTIVE) {
       throw new ForbiddenException('Only approved captains can top up');
@@ -138,11 +139,20 @@ export class TopUpsService {
     try {
       // Kashier requires a customer object on session creation.
       const account = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+      // Return the payer to the app origin that started the checkout (or the
+      // configured app origin), never to an ephemeral tunnel host.
+      const redirectUrl =
+        resolvePaymentReturnUrl({
+          origin: returnOrigin,
+          clientOrigin: process.env.CLIENT_ORIGIN,
+          configuredRedirectUrl: this.kashier.redirectUrl,
+        }) ?? this.kashier.redirectUrl;
       const session = await this.kashier.createSession({
         amount: quote.charge.toFixed(2),
         currency: 'EGP',
         orderRef: providerOrderRef,
         description: `Wallet top-up ${providerOrderRef}`,
+        redirectUrl,
         customer: { email: account?.email, reference: userId },
       });
       await this.prisma.topUp.update({

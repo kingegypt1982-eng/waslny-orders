@@ -67,12 +67,34 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     kashier as unknown as KashierClient,
   );
 
+  const ENV_KEYS = ['CLIENT_ORIGIN', 'CORS_ORIGINS'] as const;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
+  });
+
+  afterAll(() => {
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    for (const key of ENV_KEYS) delete process.env[key];
     prisma.$transaction.mockImplementation(async (callback: any) => callback(tx));
     prisma.pricingSettings.upsert.mockResolvedValue({ minTopUpAmount: 50, maxTopUpAmount: 10000, paymentFeePercent: 2.5, paymentFeeFixed: 0 });
     prisma.topUp.findFirst.mockResolvedValue(null);
   });
+
+  function stubPendingTopUp() {
+    prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    prisma.user.findUnique.mockResolvedValue({ email: 'cap@test.com' });
+    prisma.topUp.create.mockImplementation(async ({ data }: any) => ({ id: 't1', status: 'PENDING', ...data }));
+    kashier.createSession.mockResolvedValue({ sessionId: 'sess-1', checkoutUrl: 'https://pay.test/sess-1' });
+  }
 
   it('creates a PENDING top-up and returns the checkout URL and id', async () => {
     prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
@@ -89,6 +111,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
       currency: 'EGP',
       orderRef: expect.stringMatching(/^topup_[0-9a-f]{32}$/),
       description: expect.stringContaining('topup_'),
+      redirectUrl: 'myapp://wallet/topup-result',
       customer: { email: 'cap@test.com', reference: 'cap1' },
     });
     expect(prisma.topUp.create).toHaveBeenCalledWith({
@@ -101,6 +124,29 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     expect(stored.creditAmount.toFixed(2)).toBe('200.00');
     expect(stored.chargeAmount.toFixed(2)).toBe('205.13');
     expect(stored.feeAmount.toFixed(2)).toBe('5.13');
+  });
+
+  it('sends the payer back to the allow-listed request origin', async () => {
+    stubPendingTopUp();
+    process.env.CORS_ORIGINS = 'http://localhost:5173,http://localhost:5174';
+
+    await service.createTopUp('cap1', 200, 'http://localhost:5173');
+
+    expect(kashier.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ redirectUrl: 'http://localhost:5173/payment-redirect' }),
+    );
+  });
+
+  it('ignores an Origin outside the allow-list and uses CLIENT_ORIGIN', async () => {
+    stubPendingTopUp();
+    process.env.CORS_ORIGINS = 'http://localhost:5173';
+    process.env.CLIENT_ORIGIN = 'http://localhost:5173';
+
+    await service.createTopUp('cap1', 200, 'https://evil.example/phish?next=1');
+
+    expect(kashier.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ redirectUrl: 'http://localhost:5173/payment-redirect' }),
+    );
   });
 
   it('reuses a recent PENDING top-up instead of creating a duplicate', async () => {

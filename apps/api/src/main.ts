@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { assertSecretsAreNotDefaults } from './security/secret-guard';
 
 function parseOrigins(value: string | undefined): string[] {
   return (value ?? '').split(',').map((origin) => origin.trim()).filter(Boolean);
@@ -12,6 +13,9 @@ async function bootstrap() {
   if (!process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET is not set. Refusing to boot without a signing secret.');
   }
+  // Development may run with the documented placeholders; anything else must
+  // use its own JWT_SECRET / ADMIN_PASSWORD.
+  assertSecretsAreNotDefaults();
   // Kashier test integration: all five are mandatory. The per-payment webhook
   // URL may stay empty in local development (serverWebhook is then omitted),
   // but production refuses to boot without it.

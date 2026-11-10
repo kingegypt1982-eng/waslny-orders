@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
@@ -17,8 +17,12 @@ export class TopUpsController {
   @Post('topups')
   @Roles('CAPTAIN')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  create(@CurrentUser() user: { id: string }, @Body() body: CreateTopUpDto) {
-    return this.topUps.createTopUp(user.id, body.amount);
+  create(
+    @CurrentUser() user: { id: string },
+    @Body() body: CreateTopUpDto,
+    @Headers('origin') origin?: string,
+  ) {
+    return this.topUps.createTopUp(user.id, body.amount, origin);
   }
 
   @Get('topups')

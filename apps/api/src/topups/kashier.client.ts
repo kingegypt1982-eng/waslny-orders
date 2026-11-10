@@ -58,13 +58,21 @@ export class KashierClient {
     return this.config.redirectUrl;
   }
 
-  async createSession(input: { amount: string; currency: string; orderRef: string; description: string; customer?: { email?: string; reference?: string } }): Promise<KashierSession> {
+  async createSession(input: {
+    amount: string;
+    currency: string;
+    orderRef: string;
+    description: string;
+    /** Per-request return URL; falls back to the configured one. */
+    redirectUrl?: string;
+    customer?: { email?: string; reference?: string };
+  }): Promise<KashierSession> {
     const body: Record<string, unknown> = {
       amount: input.amount,
       currency: input.currency,
       order: input.orderRef,
       merchantId: this.config.merchantId,
-      merchantRedirect: this.config.redirectUrl,
+      merchantRedirect: input.redirectUrl ?? this.config.redirectUrl,
       description: input.description,
       type: 'one-time',
     };
