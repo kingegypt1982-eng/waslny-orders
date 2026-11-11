@@ -10,6 +10,18 @@ const googleWebClientId = String.fromEnvironment(
   defaultValue: String.fromEnvironment('GOOGLE_WEB_CLIENT_ID'),
 );
 
+/// True when [value] is empty or an obvious placeholder (for example the
+/// `YOUR_GOOGLE_WEB_CLIENT_ID` sample shipped in launch.json). Such a value
+/// must be treated as "not configured" instead of being handed to Google.
+bool isUnusableGoogleClientId(String? value) {
+  final normalized = value?.trim() ?? '';
+  if (normalized.isEmpty) return true;
+  final lower = normalized.toLowerCase();
+  return lower.contains('your_') ||
+      lower.contains('change_me') ||
+      lower.contains('<');
+}
+
 /// Thrown when the user dismisses the platform account picker.
 class GoogleAuthCancelled implements Exception {
   const GoogleAuthCancelled();
@@ -78,6 +90,11 @@ String googleAuthErrorMessage(Object error, {required bool isArabic}) {
     }
     final code = data is Map ? '${data['code'] ?? ''}' : '';
 
+    if (code.contains('TERMS_REQUIRED')) {
+      return isArabic
+          ? 'يرجى الموافقة على الشروط والأحكام لإنشاء حساب جديد.'
+          : 'Please accept the terms and conditions to create a new account.';
+    }
     if (message.contains('Invalid Google credential')) {
       return _message(GoogleAuthErrorKind.invalidCredential, isArabic);
     }

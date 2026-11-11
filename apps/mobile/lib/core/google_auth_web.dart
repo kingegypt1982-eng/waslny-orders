@@ -14,7 +14,7 @@ import 'google_auth_types.dart';
 /// that does not reliably return an ID token (it may synthesize user data from
 /// the People API with a null `idToken`). Callers must use the official
 /// [GoogleSignInButton] instead, so this entry point is unsupported.
-Future<String> requestGoogleIdToken() async {
+Future<String> requestGoogleIdToken({String? serverClientId}) async {
   throw const GoogleAuthException(
     GoogleAuthErrorKind.unknown,
     'Use GoogleSignInButton on web: signIn() cannot return an idToken.',
@@ -39,6 +39,7 @@ class GoogleSignInButton extends StatefulWidget {
     this.theme = GoogleButtonTheme.outline,
     this.locale,
     this.height = 46,
+    this.clientId,
   });
 
   /// Native caption; the web button uses the GIS-provided text instead.
@@ -68,6 +69,10 @@ class GoogleSignInButton extends StatefulWidget {
   /// Button height in logical pixels.
   final double height;
 
+  /// Web OAuth client ID resolved at runtime (see `googleClientIdProvider`).
+  /// When null, the compile-time `--dart-define` value is used.
+  final String? clientId;
+
   @override
   State<GoogleSignInButton> createState() => _GoogleSignInButtonState();
 }
@@ -75,7 +80,17 @@ class GoogleSignInButton extends StatefulWidget {
 class _GoogleSignInButtonState extends State<GoogleSignInButton> {
   StreamSubscription<GoogleSignInUserData?>? _subscription;
   bool _ready = false;
+  bool _initializing = false;
   bool _running = false;
+  Object? _initError;
+
+  String _clientIdOf(GoogleSignInButton widget) {
+    final runtime = widget.clientId;
+    if (!isUnusableGoogleClientId(runtime)) return runtime!.trim();
+    return isUnusableGoogleClientId(googleWebClientId)
+        ? ''
+        : googleWebClientId;
+  }
 
   @override
   void initState() {
@@ -83,25 +98,34 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
     _init();
   }
 
+  @override
+  void didUpdateWidget(covariant GoogleSignInButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The client ID may arrive after the first build (GET /auth/google/config).
+    if (_clientIdOf(widget) != _clientIdOf(oldWidget)) {
+      _subscription?.cancel();
+      _subscription = null;
+      _initError = null;
+      if (mounted) setState(() => _ready = false);
+      _init();
+    }
+  }
+
   Future<void> _init() async {
-    if (googleWebClientId.isEmpty) {
-      // Report after the first frame: onError callbacks may surface a
-      // SnackBar, which must not run during this widget's build.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          widget.onError?.call(
-            const GoogleAuthException(GoogleAuthErrorKind.notConfigured),
-          );
-        }
-      });
+    final clientId = _clientIdOf(widget);
+    if (clientId.isEmpty) {
+      // Never hide the button: it stays visible as a fallback and reports the
+      // missing configuration when tapped.
+      _initError = const GoogleAuthException(GoogleAuthErrorKind.notConfigured);
       return;
     }
+    _initializing = true;
     try {
       // Equivalent to the <meta name="google-signin-client_id"> tag; passing
       // clientId here also satisfies the plugin's init assertion.
       await GoogleSignInPlatform.instance.initWithParams(
         SignInInitParameters(
-          clientId: googleWebClientId,
+          clientId: clientId,
           scopes: const <String>[],
         ),
       );
@@ -111,13 +135,18 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
           GoogleAuthException(GoogleAuthErrorKind.unknown, error),
         ),
       );
-      if (mounted) setState(() => _ready = true);
+      if (mounted) {
+        setState(() {
+          _ready = true;
+          _initError = null;
+        });
+      }
     } catch (error, stack) {
       debugPrint('[google_auth] web init failed: ${error.runtimeType}: $error');
       debugPrint('[google_auth] stack: $stack');
-      widget.onError?.call(
-        GoogleAuthException(GoogleAuthErrorKind.notConfigured, error),
-      );
+      _initError = GoogleAuthException(GoogleAuthErrorKind.notConfigured, error);
+    } finally {
+      _initializing = false;
     }
   }
 
@@ -141,7 +170,9 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
   @override
   Widget build(BuildContext context) {
     if (!_ready) {
-      return SizedBox(width: double.infinity, height: widget.height);
+      // Always visible, even while the GIS client initializes or when it
+      // cannot be configured: an invisible button is worse than an error.
+      return _fallbackButton();
     }
     return SizedBox(
       width: double.infinity,
@@ -157,6 +188,43 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
           locale: widget.locale,
         ),
       ),
+    );
+  }
+
+  Widget _fallbackButton() {
+    const green = Color(0xFF176B55);
+    return SizedBox(
+      width: double.infinity,
+      height: widget.height,
+      child: OutlinedButton.icon(
+        onPressed: widget.busy ? null : _onFallbackTap,
+        icon: const Text(
+          'G',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: green,
+          ),
+        ),
+        label: Text(
+          widget.label,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        style: OutlinedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _onFallbackTap() {
+    // Ignore taps while the client is still initializing; report a clear
+    // reason otherwise (missing client ID or a failed GIS init).
+    if (_initializing) return;
+    widget.onError?.call(
+      _initError ?? const GoogleAuthException(GoogleAuthErrorKind.notConfigured),
     );
   }
 

@@ -54,7 +54,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         ? 'TERMS_CAPTAIN'
         : 'TERMS_CLIENT';
     try {
-      final policy = await ref.read(apiClientProvider).getMap('/policies/$type');
+      final policy = await ref
+          .read(apiClientProvider)
+          .getMap('/policies/$type');
       if (mounted) setState(() => _termsPolicy = policy);
     } catch (_) {
       // Terms text is optional; the checkbox still gates registration.
@@ -93,7 +95,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     policy?['text']?.toString() ??
                         _localized(
                           'The terms text could not be loaded. You can still '
-                          'agree to continue.',
+                              'agree to continue.',
                           'تعذر تحميل نص الشروط. يمكنك الموافقة للمتابعة.',
                         ),
                     style: const TextStyle(
@@ -219,22 +221,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   /// and web Google buttons.
   Future<void> _submitGoogle(String idToken) async {
     FocusScope.of(context).unfocus();
-    if (!_termsReady) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(
-              _localized(
-                'Please accept the terms and conditions to continue.',
-                'يرجى الموافقة على الشروط والأحكام للمتابعة.',
-              ),
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-      return;
-    }
     setState(() => _isLoading = true);
     try {
       final role = _accountType == AccountType.client ? 'CLIENT' : 'CAPTAIN';
@@ -244,6 +230,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         data: {
           'idToken': idToken,
           'role': role,
+          'termsAccepted': _termsAccepted,
           if (_accountType == AccountType.captain &&
               _vehicleTypeController.text.trim().isNotEmpty)
             'vehicleType': _vehicleTypeController.text.trim(),
@@ -253,15 +240,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         },
       );
       await api.saveSession(payload);
-      ref.read(sessionProvider.notifier).state = Map<String, dynamic>.from(
-        payload['user'] as Map,
-      );
-      await _acknowledgeTerms();
+      final user = Map<String, dynamic>.from(payload['user'] as Map);
+      ref.read(sessionProvider.notifier).state = user;
+      if (_termsAccepted) await _acknowledgeTerms();
       if (mounted) {
         // Captains with missing data or documents land on documents next.
-        context.go(
-          _accountType == AccountType.captain ? '/captain-documents' : '/',
-        );
+        context.go(user['role'] == 'CAPTAIN' ? '/captain-documents' : '/');
       }
     } catch (error) {
       if (mounted) {
@@ -269,9 +253,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           ..hideCurrentSnackBar()
           ..showSnackBar(
             SnackBar(
-              content: Text(
-                googleAuthErrorMessage(error, isArabic: _isArabic),
-              ),
+              content: Text(googleAuthErrorMessage(error, isArabic: _isArabic)),
               backgroundColor: Colors.red,
             ),
           );
@@ -316,10 +298,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         ? 'TERMS_CAPTAIN'
         : 'TERMS_CLIENT';
     try {
-      await ref.read(apiClientProvider).post(
-        '/acknowledgements',
-        data: {'type': type, 'policyVersion': version},
-      );
+      await ref
+          .read(apiClientProvider)
+          .post(
+            '/acknowledgements',
+            data: {'type': type, 'policyVersion': version},
+          );
     } catch (_) {
       // Non-fatal; order acceptance re-checks and reports missing terms.
     }
@@ -569,10 +553,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                 crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
                                   Text(
-                                    _localized(
-                                      'I agree to the ',
-                                      'أوافق على ',
-                                    ),
+                                    _localized('I agree to the ', 'أوافق على '),
                                     style: const TextStyle(
                                       fontSize: 13,
                                       color: textColor,
@@ -659,9 +640,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         ),
                         const SizedBox(height: 6),
                         GoogleSignInButton(
+                          clientId: ref
+                              .watch(googleClientIdProvider)
+                              .valueOrNull,
                           label: _localized(
-                            'Continue with Google',
-                            'المتابعة باستخدام جوجل',
+                            'Sign up with Google',
+                            'إنشاء حساب باستخدام جوجل',
                           ),
                           text: GoogleButtonText.signUp,
                           locale: _isArabic ? 'ar' : null,

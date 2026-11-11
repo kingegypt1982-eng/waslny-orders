@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import * as bcrypt from 'bcrypt';
@@ -94,6 +94,12 @@ export class AuthService {
             select: { id: true, email: true, name: true, role: true },
           });
     } else {
+      if (!input.termsAccepted) {
+        throw new BadRequestException({
+          code: 'TERMS_REQUIRED',
+          message: 'Accept the terms and conditions to create a Google account',
+        });
+      }
       // No phone yet (completed later); captain vehicle stays NULL until completed.
       account = await this.prisma.user.create({
         data: {

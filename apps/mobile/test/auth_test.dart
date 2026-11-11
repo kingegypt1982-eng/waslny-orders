@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/api_client.dart';
+import 'package:wasalny_orders/core/texts.dart';
 import 'package:wasalny_orders/screens.dart';
 import 'package:wasalny_orders/screens/forgot_password.dart';
 import 'package:wasalny_orders/screens/register_screen.dart';
@@ -32,6 +33,8 @@ void main() {
   });
 
   testWidgets('RegisterScreen shows Google button', (tester) async {
+    appLanguage.value = 'en';
+    addTearDown(() => appLanguage.value = 'ar');
     SharedPreferences.setMockInitialValues({});
     final preferences = await SharedPreferences.getInstance();
 
@@ -43,7 +46,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.text('Sign up with Google'), findsOneWidget);
   });
 
   testWidgets('forgot dialog posts email and shows server message', (

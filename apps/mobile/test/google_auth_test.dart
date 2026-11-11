@@ -8,9 +8,30 @@ import 'package:google_sign_in_platform_interface/google_sign_in_platform_interf
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/api_client.dart';
 import 'package:wasalny_orders/core/google_auth.dart';
+import 'package:wasalny_orders/core/texts.dart';
 import 'package:wasalny_orders/screens.dart';
+import 'package:wasalny_orders/screens/register_screen.dart';
 
 void main() {
+  group('isUnusableGoogleClientId', () {
+    test('treats empty and placeholder values as not configured', () {
+      expect(isUnusableGoogleClientId(null), isTrue);
+      expect(isUnusableGoogleClientId(''), isTrue);
+      expect(isUnusableGoogleClientId('   '), isTrue);
+      expect(isUnusableGoogleClientId('YOUR_GOOGLE_WEB_CLIENT_ID'), isTrue);
+      expect(isUnusableGoogleClientId('CHANGE_ME_CLIENT_ID'), isTrue);
+    });
+
+    test('accepts a real web client ID', () {
+      expect(
+        isUnusableGoogleClientId(
+          '1234567890-abcdefg.apps.googleusercontent.com',
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('googleAuthErrorMessage', () {
     final options = RequestOptions(path: '/auth/google');
 
@@ -38,10 +59,7 @@ void main() {
         googleAuthErrorMessage(error, isArabic: false),
         contains('verify'),
       );
-      expect(
-        googleAuthErrorMessage(error, isArabic: true),
-        contains('توثيق'),
-      );
+      expect(googleAuthErrorMessage(error, isArabic: true), contains('توثيق'));
     });
 
     test('maps account mismatch and missing configuration', () {
@@ -256,6 +274,280 @@ void main() {
     expect(api.requestBody, containsPair('role', 'CLIENT'));
     expect(find.text('home screen'), findsOneWidget);
   });
+
+  testWidgets(
+    'RegisterScreen Google button signs in an existing account without terms',
+    (tester) async {
+      appLanguage.value = 'en';
+      addTearDown(() => appLanguage.value = 'ar');
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      GoogleSignInPlatform.instance = _FakeGoogleSignInPlatform(
+        data: GoogleSignInUserData(
+          email: 'rider@example.com',
+          id: '123',
+          idToken: 'google-id-token',
+        ),
+      );
+      addTearDown(
+        () => GoogleSignInPlatform.instance = MethodChannelGoogleSignIn(),
+      );
+
+      final api = _RecordingApiClient(
+        preferences,
+        response: {
+          'accessToken': 'api-jwt',
+          'user': {
+            'id': 'u1',
+            'email': 'rider@example.com',
+            'name': 'Rider',
+            'role': 'CLIENT',
+          },
+        },
+      );
+      final router = GoRouter(
+        initialLocation: '/register',
+        routes: [
+          GoRoute(
+            path: '/register',
+            builder: (context, state) => const RegisterScreen(),
+          ),
+          GoRoute(
+            path: '/',
+            builder: (context, state) =>
+                const Scaffold(body: Text('home screen')),
+          ),
+          GoRoute(
+            path: '/captain-documents',
+            builder: (context, state) =>
+                const Scaffold(body: Text('documents screen')),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            preferencesProvider.overrideWithValue(preferences),
+            apiClientProvider.overrideWithValue(api),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sign up with Google'), findsOneWidget);
+      await tester.ensureVisible(find.text('Sign up with Google'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign up with Google'));
+      await tester.pumpAndSettle();
+
+      expect(api.requestPath, '/auth/google');
+      expect(api.requestBody, containsPair('termsAccepted', false));
+      expect(find.text('home screen'), findsOneWidget);
+    },
+  );
+
+  testWidgets('new Google account without terms shows a clear message', (
+    tester,
+  ) async {
+    appLanguage.value = 'en';
+    addTearDown(() => appLanguage.value = 'ar');
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    GoogleSignInPlatform.instance = _FakeGoogleSignInPlatform(
+      data: GoogleSignInUserData(
+        email: 'new-rider@example.com',
+        id: '456',
+        idToken: 'google-id-token',
+      ),
+    );
+    addTearDown(
+      () => GoogleSignInPlatform.instance = MethodChannelGoogleSignIn(),
+    );
+
+    final options = RequestOptions(path: '/auth/google');
+    final api = _RecordingApiClient(
+      preferences,
+      response: const {},
+      postError: DioException(
+        requestOptions: options,
+        response: Response(
+          requestOptions: options,
+          statusCode: 400,
+          data: {
+            'code': 'TERMS_REQUIRED',
+            'message':
+                'Accept the terms and conditions to create a Google account',
+          },
+        ),
+      ),
+    );
+    final router = GoRouter(
+      initialLocation: '/register',
+      routes: [
+        GoRoute(
+          path: '/register',
+          builder: (context, state) => const RegisterScreen(),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          preferencesProvider.overrideWithValue(preferences),
+          apiClientProvider.overrideWithValue(api),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Sign up with Google'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign up with Google'));
+    await tester.pumpAndSettle();
+
+    expect(api.requestPath, '/auth/google');
+    expect(
+      find.text(
+        'Please accept the terms and conditions to create a new account.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('AuthScreen sign-up blocks Google until the terms are accepted', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    GoogleSignInPlatform.instance = _FakeGoogleSignInPlatform(
+      data: GoogleSignInUserData(
+        email: 'new-rider@example.com',
+        id: '456',
+        idToken: 'google-id-token',
+      ),
+    );
+    addTearDown(
+      () => GoogleSignInPlatform.instance = MethodChannelGoogleSignIn(),
+    );
+
+    final api = _RecordingApiClient(preferences, response: const {});
+    final router = GoRouter(
+      initialLocation: '/auth',
+      routes: [
+        GoRoute(
+          path: '/auth',
+          builder: (context, state) =>
+              const AuthScreen(register: true, role: 'CLIENT'),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          preferencesProvider.overrideWithValue(preferences),
+          apiClientProvider.overrideWithValue(api),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Sign up with Google'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign up with Google'));
+    await tester.pumpAndSettle();
+
+    expect(api.requestPath, isNull);
+    expect(
+      find.text(
+        'Please accept the terms and conditions to create a new account.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('AuthScreen captain sign-up sends terms and opens documents', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    GoogleSignInPlatform.instance = _FakeGoogleSignInPlatform(
+      data: GoogleSignInUserData(
+        email: 'captain@example.com',
+        id: '789',
+        idToken: 'google-id-token',
+      ),
+    );
+    addTearDown(
+      () => GoogleSignInPlatform.instance = MethodChannelGoogleSignIn(),
+    );
+
+    final api = _RecordingApiClient(
+      preferences,
+      response: {
+        'accessToken': 'api-jwt',
+        'user': {
+          'id': 'u2',
+          'email': 'captain@example.com',
+          'name': 'Captain',
+          'role': 'CAPTAIN',
+        },
+      },
+    );
+    final router = GoRouter(
+      initialLocation: '/auth',
+      routes: [
+        GoRoute(
+          path: '/auth',
+          builder: (context, state) =>
+              const AuthScreen(register: true, role: 'CAPTAIN'),
+        ),
+        GoRoute(
+          path: '/',
+          builder: (context, state) =>
+              const Scaffold(body: Text('home screen')),
+        ),
+        GoRoute(
+          path: '/captain-documents',
+          builder: (context, state) =>
+              const Scaffold(body: Text('documents screen')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          preferencesProvider.overrideWithValue(preferences),
+          apiClientProvider.overrideWithValue(api),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('I accept the Terms & Conditions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('I accept the Terms & Conditions'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Sign up with Google'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign up with Google'));
+    await tester.pumpAndSettle();
+
+    expect(api.requestPath, '/auth/google');
+    expect(api.requestBody, containsPair('termsAccepted', true));
+    expect(api.requestBody, containsPair('role', 'CAPTAIN'));
+    expect(find.text('documents screen'), findsOneWidget);
+  });
 }
 
 class _FakeGoogleSignInPlatform extends GoogleSignInPlatform {
@@ -288,17 +580,28 @@ class _FakeGoogleSignInPlatform extends GoogleSignInPlatform {
 }
 
 class _RecordingApiClient extends ApiClient {
-  _RecordingApiClient(super.preferences, {required Map<String, dynamic> response})
-    : _response = Map<String, dynamic>.from(response);
+  _RecordingApiClient(
+    super.preferences, {
+    required Map<String, dynamic> response,
+    this.postError,
+  }) : _response = Map<String, dynamic>.from(response);
 
   final Map<String, dynamic> _response;
+  final Object? postError;
   String? requestPath;
   Map<String, dynamic>? requestBody;
+
+  @override
+  Future<Map<String, dynamic>> getMap(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => {};
 
   @override
   Future<Map<String, dynamic>> post(String path, {Object? data}) async {
     requestPath = path;
     requestBody = Map<String, dynamic>.from(data! as Map);
+    if (postError != null) throw postError!;
     return Map<String, dynamic>.from(_response);
   }
 }

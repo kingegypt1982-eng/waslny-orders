@@ -14,4 +14,5 @@ library;
 
 export 'google_auth_native.dart'
     if (dart.library.js_interop) 'google_auth_web.dart';
+export 'google_auth_config.dart';
 export 'google_auth_types.dart';

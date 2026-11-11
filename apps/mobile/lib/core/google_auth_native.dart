@@ -6,10 +6,17 @@ import 'google_auth_types.dart';
 /// Runs the native Google sign-in flow (Android/iOS/desktop) and returns the
 /// ID token to send to POST /auth/google.
 ///
+/// [serverClientId] is the web OAuth client ID from the API. Android needs it
+/// to return an `idToken` (the server verifies that audience); iOS uses its own
+/// plist, so passing it there is harmless.
+///
 /// Throws [GoogleAuthCancelled] when the user dismisses the account picker.
-Future<String> requestGoogleIdToken() async {
+Future<String> requestGoogleIdToken({String? serverClientId}) async {
   try {
-    final account = await GoogleSignIn(scopes: const ['email', 'profile']).signIn();
+    final account = await GoogleSignIn(
+      scopes: const ['email', 'profile'],
+      serverClientId: serverClientId,
+    ).signIn();
     if (account == null) throw const GoogleAuthCancelled();
     final auth = await account.authentication;
     final idToken = auth.idToken;
@@ -45,6 +52,7 @@ class GoogleSignInButton extends StatefulWidget {
     this.theme = GoogleButtonTheme.outline,
     this.locale,
     this.height = 46,
+    this.clientId,
   });
 
   /// Native button caption (the web button uses the GIS-provided text).
@@ -74,6 +82,10 @@ class GoogleSignInButton extends StatefulWidget {
   /// Button height in logical pixels.
   final double height;
 
+  /// Web OAuth client ID resolved at runtime (see `googleClientIdProvider`).
+  /// Android uses it as `serverClientId`; iOS ignores it.
+  final String? clientId;
+
   @override
   State<GoogleSignInButton> createState() => _GoogleSignInButtonState();
 }
@@ -86,7 +98,9 @@ class _GoogleSignInButtonState extends State<GoogleSignInButton> {
     if (_running || widget.busy) return;
     setState(() => _running = true);
     try {
-      final idToken = await requestGoogleIdToken();
+      final idToken = await requestGoogleIdToken(
+        serverClientId: widget.clientId,
+      );
       await widget.onIdToken(idToken);
     } on GoogleAuthCancelled {
       widget.onCancel?.call();

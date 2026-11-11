@@ -44,7 +44,9 @@ class WelcomeScreen extends ConsumerWidget {
   ) async {
     await ref.read(preferencesProvider).setString('selected_role', role);
     if (context.mounted) {
-      context.push(role == 'CAPTAIN' ? '/captain-start' : '/register?role=$role');
+      context.push(
+        role == 'CAPTAIN' ? '/captain-start' : '/register?role=$role',
+      );
     }
   }
 
@@ -157,6 +159,16 @@ class WelcomeScreen extends ConsumerWidget {
                 ),
               ),
 
+              const SizedBox(height: 14),
+              TextButton(
+                onPressed: () => context.push('/auth?mode=login&role=CLIENT'),
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                child: const Text(
+                  'لديك حساب بالفعل؟ سجل الدخول',
+                  style: TextStyle(fontSize: 14),
+                ),
+              ),
+
               const SizedBox(height: 30),
             ],
           ),
@@ -185,6 +197,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   late bool _register = widget.register;
   late String _role = widget.role;
   bool _busy = false;
+  bool _termsAccepted = false;
 
   @override
   void dispose() {
@@ -242,6 +255,15 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   /// Exchanges a Google ID token for a Wasalny session. Shared by the native
   /// and web Google buttons.
   Future<void> _submitGoogle(String idToken) async {
+    // A brand-new Google account needs explicit consent; the API rejects the
+    // request with TERMS_REQUIRED otherwise, so gate it here as well.
+    if (_register && !_termsAccepted) {
+      _showMessage(
+        context,
+        'Please accept the terms and conditions to create a new account.',
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
       final api = ref.read(apiClientProvider);
@@ -250,6 +272,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         data: {
           'idToken': idToken,
           'role': _role,
+          if (_register) 'termsAccepted': _termsAccepted,
           if (_role == 'CAPTAIN' && _vehicleType.text.trim().isNotEmpty)
             'vehicleType': _vehicleType.text.trim(),
           if (_role == 'CAPTAIN' && _plate.text.trim().isNotEmpty)
@@ -257,11 +280,15 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         },
       );
       await api.saveSession(payload);
-      ref.read(sessionProvider.notifier).state = Map<String, dynamic>.from(
-        payload['user'] as Map,
-      );
+      final user = Map<String, dynamic>.from(payload['user'] as Map);
+      ref.read(sessionProvider.notifier).state = user;
+      // Only a fresh captain sign-up goes to the documents step; existing
+      // captains land on the home shell, which routes by account status
+      // (same behaviour as email sign-in).
       if (mounted) {
-        context.go(_role == 'CAPTAIN' ? '/captain-documents' : '/');
+        context.go(
+          _register && user['role'] == 'CAPTAIN' ? '/captain-documents' : '/',
+        );
       }
     } catch (error) {
       if (mounted) {
@@ -384,6 +411,22 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                         ? null
                         : 'Use at least 8 characters',
                   ),
+                  const SizedBox(height: 12),
+                  if (_register)
+                    CheckboxListTile(
+                      value: _termsAccepted,
+                      onChanged: _busy
+                          ? null
+                          : (value) =>
+                                setState(() => _termsAccepted = value ?? false),
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      dense: true,
+                      title: const Text(
+                        'I accept the Terms & Conditions',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ),
                   const SizedBox(height: 22),
                   _PrimaryButton(
                     label: _busy
@@ -425,6 +468,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   ),
                   const SizedBox(height: 6),
                   GoogleSignInButton(
+                    clientId: ref.watch(googleClientIdProvider).valueOrNull,
                     label: _register
                         ? 'Sign up with Google'
                         : 'Continue with Google',
@@ -858,7 +902,8 @@ class _ApprovalPanel extends StatelessWidget {
           'The Wasalny team will review your documents. You can accept deliveries once your captain profile is approved.',
           style: TextStyle(color: _muted, height: 1.45, fontSize: 12),
         ),
-        if (status == 'REJECTED' && (rejectionReason ?? '').trim().isNotEmpty) ...[
+        if (status == 'REJECTED' &&
+            (rejectionReason ?? '').trim().isNotEmpty) ...[
           const SizedBox(height: 11),
           Container(
             width: double.infinity,
@@ -961,7 +1006,10 @@ NationalIdValidation validateEgyptianNationalId(
 }) {
   final id = raw.trim();
   if (!RegExp(r'^\d{14}$').hasMatch(id)) {
-    return const NationalIdValidation(valid: false, error: NationalIdError.length);
+    return const NationalIdValidation(
+      valid: false,
+      error: NationalIdError.length,
+    );
   }
   final century = id[0];
   final yearPart = int.parse(id.substring(1, 3));
@@ -979,7 +1027,10 @@ NationalIdValidation validateEgyptianNationalId(
   final month = int.parse(id.substring(3, 5));
   final day = int.parse(id.substring(5, 7));
   if (month < 1 || month > 12 || day < 1 || day > 31) {
-    return const NationalIdValidation(valid: false, error: NationalIdError.date);
+    return const NationalIdValidation(
+      valid: false,
+      error: NationalIdError.date,
+    );
   }
   final birthDate = DateTime(fullYear, month, day);
   if (birthDate.year != fullYear ||
@@ -1063,7 +1114,8 @@ class CaptainDocumentsScreen extends ConsumerStatefulWidget {
       _CaptainDocumentsScreenState();
 }
 
-class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen> {
+class _CaptainDocumentsScreenState
+    extends ConsumerState<CaptainDocumentsScreen> {
   static const _background = Color(0xFFF7F8F5);
   static const _primary = Color(0xFF176B55);
   static const _fieldBorder = Color(0xFFE1E6E1);
@@ -1137,7 +1189,8 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     return value is String && value != 'PENDING_UPLOAD';
   }
 
-  bool _hasDocument(String type) => _uploaded(type) || _picked.containsKey(type);
+  bool _hasDocument(String type) =>
+      _uploaded(type) || _picked.containsKey(type);
 
   String? get _nationalIdLast4 {
     final value = _profile['nationalIdLast4'];
@@ -1277,8 +1330,9 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     final result = validateEgyptianNationalId(typed);
     setState(() {
       _nationalIdResult = result;
-      _nationalIdErrorText =
-          result.valid ? null : _nationalIdErrorMessage(result.error!);
+      _nationalIdErrorText = result.valid
+          ? null
+          : _nationalIdErrorMessage(result.error!);
     });
   }
 
@@ -1300,12 +1354,13 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: Text(_t('Choose from gallery', 'اختيار من المعرض')),
-              onTap: () =>
-                  Navigator.pop(sheetContext, _DocumentSource.gallery),
+              onTap: () => Navigator.pop(sheetContext, _DocumentSource.gallery),
             ),
             ListTile(
               leading: const Icon(Icons.picture_as_pdf_outlined),
-              title: Text(_t('Choose a file (JPG/PNG/PDF)', 'اختيار ملف (JPG/PNG/PDF)')),
+              title: Text(
+                _t('Choose a file (JPG/PNG/PDF)', 'اختيار ملف (JPG/PNG/PDF)'),
+              ),
               onTap: () => Navigator.pop(sheetContext, _DocumentSource.file),
             ),
           ],
@@ -1337,7 +1392,10 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       if (mounted) {
         _showMessage(
           context,
-          _t('Could not read the selected document.', 'تعذر قراءة المستند المحدد.'),
+          _t(
+            'Could not read the selected document.',
+            'تعذر قراءة المستند المحدد.',
+          ),
         );
       }
       return null;
@@ -1356,7 +1414,10 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       if (mounted) {
         _showMessage(
           context,
-          _t('Could not read the selected document.', 'تعذر قراءة المستند المحدد.'),
+          _t(
+            'Could not read the selected document.',
+            'تعذر قراءة المستند المحدد.',
+          ),
         );
       }
       return null;
@@ -1370,10 +1431,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       if (mounted) {
         _showMessage(
           context,
-          _t(
-            'Upload a PDF, JPG, or PNG file.',
-            'ارفع ملف PDF أو JPG أو PNG.',
-          ),
+          _t('Upload a PDF, JPG, or PNG file.', 'ارفع ملف PDF أو JPG أو PNG.'),
         );
       }
       return null;
@@ -1382,10 +1440,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       if (mounted) {
         _showMessage(
           context,
-          _t(
-            'The file is larger than 8MB.',
-            'حجم الملف أكبر من 8 ميجابايت.',
-          ),
+          _t('The file is larger than 8MB.', 'حجم الملف أكبر من 8 ميجابايت.'),
         );
       }
       return null;
@@ -1398,11 +1453,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     if (picked == null) return;
     await ref
         .read(apiClientProvider)
-        .uploadFile(
-          '/captains/documents/$type',
-          picked.bytes,
-          picked.name,
-        );
+        .uploadFile('/captains/documents/$type', picked.bytes, picked.name);
     _profile[_docFields[type]!] = 'uploaded';
     _picked.remove(type);
   }
@@ -1485,10 +1536,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
       if (!_hasDocument('profile-photo')) {
         _showMessage(
           context,
-          _t(
-            'Attach a personal photo (selfie).',
-            'أرفق صورة شخصية (سيلفي).',
-          ),
+          _t('Attach a personal photo (selfie).', 'أرفق صورة شخصية (سيلفي).'),
         );
         return false;
       }
@@ -1496,7 +1544,10 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     }
     if (_step == 1) {
       if (_licenseNumber.text.trim().isEmpty) {
-        _showMessage(context, _t('Enter your license number.', 'أدخل رقم الرخصة.'));
+        _showMessage(
+          context,
+          _t('Enter your license number.', 'أدخل رقم الرخصة.'),
+        );
         return false;
       }
       if (!_hasDocument('license')) {
@@ -1553,14 +1604,20 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     if (!_hasDocument('vehicle')) {
       _showMessage(
         context,
-        _t('Attach the vehicle registration document.', 'أرفق صورة رخصة المركبة.'),
+        _t(
+          'Attach the vehicle registration document.',
+          'أرفق صورة رخصة المركبة.',
+        ),
       );
       return false;
     }
     if (!_hasDocument('vehicle-back')) {
       _showMessage(
         context,
-        _t('Attach the back of the vehicle registration document.', 'أرفق صورة ظهر رخصة المركبة.'),
+        _t(
+          'Attach the back of the vehicle registration document.',
+          'أرفق صورة ظهر رخصة المركبة.',
+        ),
       );
       return false;
     }
@@ -1764,9 +1821,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
                   style: TextStyle(
                     color: i == _step ? _ink : _muted,
                     fontSize: 10,
-                    fontWeight: i == _step
-                        ? FontWeight.w700
-                        : FontWeight.w500,
+                    fontWeight: i == _step ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
               ),
@@ -1892,12 +1947,18 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     _documentTile(
       'license',
       _t('License (front)', 'رخصة القيادة (الوجه)'),
-      _t('A photo of the front of your driving license', 'صورة وجه رخصة القيادة'),
+      _t(
+        'A photo of the front of your driving license',
+        'صورة وجه رخصة القيادة',
+      ),
     ),
     _documentTile(
       'license-back',
       _t('License (back)', 'رخصة القيادة (الظهر)'),
-      _t('A photo of the back of your driving license', 'صورة ظهر رخصة القيادة'),
+      _t(
+        'A photo of the back of your driving license',
+        'صورة ظهر رخصة القيادة',
+      ),
     ),
   ];
 
@@ -1919,10 +1980,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     const SizedBox(height: 12),
     _textField(
       controller: _registrationNumber,
-      label: _t(
-        'Vehicle license number',
-        'رقم رخصة المركبة',
-      ),
+      label: _t('Vehicle license number', 'رقم رخصة المركبة'),
       icon: Icons.assignment_outlined,
     ),
     const SizedBox(height: 12),
@@ -1947,12 +2005,18 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
     _documentTile(
       'vehicle',
       _t('Vehicle registration (front)', 'رخصة المركبة (الوجه)'),
-      _t('A photo of the front of the vehicle registration', 'صورة وجه رخصة تسيير المركبة'),
+      _t(
+        'A photo of the front of the vehicle registration',
+        'صورة وجه رخصة تسيير المركبة',
+      ),
     ),
     _documentTile(
       'vehicle-back',
       _t('Vehicle registration (back)', 'رخصة المركبة (الظهر)'),
-      _t('A photo of the back of the vehicle registration', 'صورة ظهر رخصة تسيير المركبة'),
+      _t(
+        'A photo of the back of the vehicle registration',
+        'صورة ظهر رخصة تسيير المركبة',
+      ),
     ),
   ];
 
@@ -2073,9 +2137,7 @@ class _CaptainDocumentsScreenState extends ConsumerState<CaptainDocumentsScreen>
         ),
         trailing: TextButton(
           onPressed: _submitting ? null : () => _pickFile(type),
-          child: Text(
-            ready ? _t('Replace', 'استبدال') : _t('Add', 'إضافة'),
-          ),
+          child: Text(ready ? _t('Replace', 'استبدال') : _t('Add', 'إضافة')),
         ),
       ),
     );
@@ -2618,10 +2680,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
               labelText: tr(ar: 'المبلغ بالجنيه', en: 'Amount in EGP'),
             ),
             onChanged: (value) => text = value,
-            onSubmitted: (value) => Navigator.pop(
-              context,
-              double.tryParse(value.trim()),
-            ),
+            onSubmitted: (value) =>
+                Navigator.pop(context, double.tryParse(value.trim())),
           ),
           actions: [
             TextButton(
@@ -2718,7 +2778,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
         context,
         tr(
           ar: 'تعذّر فتح المتصفح تلقائيًا. اضغط «افتح صفحة الدفع» بالأسفل.',
-          en: 'Could not open the browser automatically. Tap "Open payment '
+          en:
+              'Could not open the browser automatically. Tap "Open payment '
               'page" below.',
         ),
       );
@@ -2760,7 +2821,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
           context,
           tr(
             ar: 'ما زال الدفع قيد التأكيد، سيُحدَّث رصيدك تلقائيًا',
-            en: 'Payment is still being confirmed; your balance will update '
+            en:
+                'Payment is still being confirmed; your balance will update '
                 'automatically.',
           ),
         );
@@ -2900,7 +2962,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
               ),
             ),
             const SizedBox(height: 22),
-            _SectionTitle(title: tr(ar: 'المعاملات', en: 'Transactions')),
+            _SectionTitle(
+              title: tr(ar: 'المعاملات', en: 'Transactions'),
+            ),
             const SizedBox(height: 9),
             if (transactions.isEmpty)
               _EmptyState(
@@ -3080,7 +3144,8 @@ class _PendingTopUpBanner extends StatelessWidget {
                       )
                     : tr(
                         ar: 'في انتظار تأكيد شحن $credit…',
-                        en: 'Waiting for the EGP $credit top-up to be '
+                        en:
+                            'Waiting for the EGP $credit top-up to be '
                             'confirmed…',
                       ),
                 style: const TextStyle(color: _ink, fontSize: 12),
@@ -3118,10 +3183,7 @@ class _PendingTopUpBanner extends StatelessWidget {
                 foregroundColor: _green,
               ),
               label: Text(
-                tr(
-                  ar: 'افتح صفحة الدفع',
-                  en: 'Open payment page',
-                ),
+                tr(ar: 'افتح صفحة الدفع', en: 'Open payment page'),
                 style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,

@@ -56,7 +56,7 @@ describe('Google sign-in', () => {
       .mockResolvedValueOnce({ phone: null, captain: null });
     prisma.user.create.mockImplementation(async ({ data }: any) => ({ id: 'u9', ...data }));
 
-    const result = await service.googleLogin({ idToken: 'tok', role: 'CLIENT' });
+    const result = await service.googleLogin({ idToken: 'tok', role: 'CLIENT', termsAccepted: true });
 
     expect(prisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -77,7 +77,7 @@ describe('Google sign-in', () => {
       .mockResolvedValueOnce({ phone: null, captain: { vehicleType: null, vehiclePlate: null } });
     prisma.user.create.mockImplementation(async ({ data }: any) => ({ id: 'u10', ...data, role: 'CAPTAIN' }));
 
-    const result = await service.googleLogin({ idToken: 'tok', role: 'CAPTAIN' });
+    const result = await service.googleLogin({ idToken: 'tok', role: 'CAPTAIN', termsAccepted: true });
 
     const data = prisma.user.create.mock.calls[0][0].data;
     expect(data.captain.create.vehicleType).toBeNull();
@@ -109,7 +109,27 @@ describe('Google sign-in', () => {
 
   it('rejects tampered tokens', async () => {
     mockVerifyIdToken.mockRejectedValue(new Error('bad signature'));
-    await expect(service.googleLogin({ idToken: 'tok', role: 'CLIENT' })).rejects.toBeInstanceOf(UnauthorizedException);
+    const error = await service.googleLogin({ idToken: 'tok', role: 'CLIENT' }).catch((e) => e);
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    expect(error.getStatus()).toBe(401);
+    expect(error.message).toBe('Invalid Google credential');
+    expect(mockVerifyIdToken).toHaveBeenCalledWith({
+      idToken: 'tok',
+      audience: 'test-web-client-id',
+    });
+  });
+
+  it('requires terms before creating a new Google account', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce(null);
+    const error = await service.googleLogin({
+      idToken: 'tok',
+      role: 'CLIENT',
+      termsAccepted: false,
+    }).catch((e) => e);
+
+    expect(error.getStatus()).toBe(400);
+    expect(error.response).toMatchObject({ code: 'TERMS_REQUIRED' });
+    expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
   it('refuses clearly when GOOGLE_CLIENT_ID is not configured', async () => {

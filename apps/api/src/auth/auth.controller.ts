@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -19,6 +19,12 @@ export class AuthController {
   @Post('login') login(@Body() body: LoginDto) { return this.auth.login(body); }
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('google') google(@Body() body: GoogleLoginDto) { return this.auth.googleLogin(body); }
+  // Public on purpose: the Flutter web client must render the Google button
+  // with the same client ID the API verifies as the token audience. A web
+  // OAuth client ID is not a secret (it is visible in every browser request).
+  @Get('google/config') googleConfig() {
+    return { clientId: process.env.GOOGLE_CLIENT_ID ?? '' };
+  }
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('forgot-password') forgotPassword(@Body() body: ForgotPasswordDto) { return this.auth.forgotPassword(body); }
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
