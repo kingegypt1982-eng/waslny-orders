@@ -85,18 +85,56 @@ describe('Google sign-in', () => {
     expect(result.missing).toEqual(['phone', 'vehicle']);
   });
 
-  it('links an existing password account and keeps its password', async () => {
+  it('signs in an account already linked to the same Google identity', async () => {
     prisma.user.findUnique
-      .mockResolvedValueOnce({ id: 'u1', email: 'guser@waslny.com', name: 'G', role: 'CLIENT', googleId: null, suspendedAt: null })
+      .mockResolvedValueOnce({ id: 'u1', email: 'guser@waslny.com', name: 'G', role: 'CLIENT', googleId: 'google-123', passwordHash: null, suspendedAt: null })
       .mockResolvedValueOnce({ phone: '+201000000000', captain: null });
-    prisma.user.update.mockImplementation(async ({ data }: any) => ({ id: 'u1', email: 'guser@waslny.com', name: 'G', role: 'CLIENT', ...data }));
+
+    const result = await service.googleLogin({ idToken: 'tok', role: 'CLIENT' });
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ accessToken: 'signed-token' });
+  });
+
+  it('refuses to link an existing password account instead of taking it over', async () => {
+    const passwordHash = '$2b$12$notARealHashJustForTheMock';
+    const existing = {
+      id: 'u1',
+      email: 'guser@waslny.com',
+      name: 'G',
+      role: 'CLIENT',
+      googleId: null,
+      passwordHash,
+      suspendedAt: null,
+    };
+    prisma.user.findUnique.mockResolvedValueOnce(existing);
+
+    const error = await service.googleLogin({ idToken: 'tok', role: 'CLIENT' }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(error.getStatus()).toBe(409);
+    expect(error.response).toMatchObject({ code: 'EMAIL_USES_PASSWORD_LOGIN' });
+    // No linking write, no new account, no session, and the password stays.
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+    expect(existing.passwordHash).toBe(passwordHash);
+    expect(existing.googleId).toBeNull();
+  });
+
+  it('still links an account that has no password and no Google identity', async () => {
+    prisma.user.findUnique
+      .mockResolvedValueOnce({ id: 'u2', email: 'guser@waslny.com', name: 'G', role: 'CLIENT', googleId: null, passwordHash: null, suspendedAt: null })
+      .mockResolvedValueOnce({ phone: '+201000000000', captain: null });
+    prisma.user.update.mockImplementation(async ({ data }: any) => ({ id: 'u2', email: 'guser@waslny.com', name: 'G', role: 'CLIENT', ...data }));
 
     const result = await service.googleLogin({ idToken: 'tok', role: 'CLIENT' });
 
     expect(prisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { googleId: 'google-123' } }),
     );
-    expect(result.missing).toEqual([]);
+    expect(result).toMatchObject({ accessToken: 'signed-token' });
   });
 
   it('rejects unverified emails', async () => {

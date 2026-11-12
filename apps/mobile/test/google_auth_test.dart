@@ -96,6 +96,28 @@ void main() {
       );
     });
 
+    test('maps the password-account conflict to a sign-in-with-password hint', () {
+      final conflict = DioException(
+        requestOptions: options,
+        response: Response(
+          requestOptions: options,
+          statusCode: 409,
+          data: {
+            'code': 'EMAIL_USES_PASSWORD_LOGIN',
+            'message':
+                'This email is registered with a password. Sign in with your password to continue',
+          },
+        ),
+      );
+
+      final english = googleAuthErrorMessage(conflict, isArabic: false);
+      expect(english, contains('password'));
+      expect(english, isNot(contains('Google')));
+
+      final arabic = googleAuthErrorMessage(conflict, isArabic: true);
+      expect(arabic, contains('كلمة مرور'));
+    });
+
     test('maps connectivity failures', () {
       final offline = DioException(
         requestOptions: options,

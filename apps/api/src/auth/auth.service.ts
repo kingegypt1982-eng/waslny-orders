@@ -86,6 +86,20 @@ export class AuthService {
       if (existing.googleId && existing.googleId !== google.sub) {
         throw new ConflictException({ code: 'GOOGLE_ACCOUNT_MISMATCH', message: 'This email is already linked to another Google account' });
       }
+      // Never attach a Google identity to an account that already has its own
+      // credentials. Registration does not verify email ownership, so an
+      // attacker can pre-register the victim's email and keep the password
+      // after the victim "links" Google (pre-hijacking). The token is already
+      // verified here, so this message does not leak account existence to
+      // anonymous callers.
+      if (!existing.googleId && existing.passwordHash) {
+        throw new ConflictException({
+          code: 'EMAIL_USES_PASSWORD_LOGIN',
+          message: 'This email is registered with a password. Sign in with your password to continue',
+        });
+      }
+      // No Google ID and no password: the account has no other way in, so
+      // linking it is safe (nothing for an attacker to keep using).
       account = existing.googleId
         ? { id: existing.id, email: existing.email, name: existing.name, role: existing.role }
         : await this.prisma.user.update({

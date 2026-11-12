@@ -95,6 +95,11 @@ String googleAuthErrorMessage(Object error, {required bool isArabic}) {
           ? 'يرجى الموافقة على الشروط والأحكام لإنشاء حساب جديد.'
           : 'Please accept the terms and conditions to create a new account.';
     }
+    if (code.contains('EMAIL_USES_PASSWORD_LOGIN')) {
+      return isArabic
+          ? 'هذا البريد مسجّل بكلمة مرور، سجّل دخولك بها.'
+          : 'This email is registered with a password. Please sign in with your password.';
+    }
     if (message.contains('Invalid Google credential')) {
       return _message(GoogleAuthErrorKind.invalidCredential, isArabic);
     }
