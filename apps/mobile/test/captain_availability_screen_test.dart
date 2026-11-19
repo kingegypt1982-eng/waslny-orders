@@ -52,7 +52,7 @@ void main() {
     expect(find.textContaining('الطلبات القريبة (2)'), findsOneWidget);
     expect(find.text('0.4 كم من موقعك'), findsOneWidget);
     expect(find.text('1.8 كم من موقعك'), findsOneWidget);
-    expect(find.text('صافي ربحك: EGP 40'), findsNWidgets(2));
+    expect(find.text('صافي ربحك: ج.م 40.00'), findsNWidgets(2));
     expect(find.text('قبول الطلب'), findsNWidgets(2));
     expect(find.text('تخطي'), findsNWidgets(2));
     // The raw `PACKAGE` enum is rendered as an Arabic label, never verbatim.
@@ -75,6 +75,40 @@ void main() {
       find.textContaining('(المسموح من 0.5 كم إلى 15 كم)'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('home shows the wallet balance and minimum above the feed', (
+    tester,
+  ) async {
+    final api = _FakeApi(await _preferences())
+      ..wallet = {'balance': '100.00', 'minimumWalletBalance': '50.00'};
+    await _pumpAvailability(tester, api);
+
+    expect(
+      find.text('الرصيد: ج.م 100.00 · الحد الأدنى: ج.م 50.00'),
+      findsOneWidget,
+    );
+    expect(find.text('شحن الرصيد'), findsNothing);
+  });
+
+  testWidgets('low balance warns and the top-up button opens the wallet', (
+    tester,
+  ) async {
+    final api = _FakeApi(await _preferences())
+      ..wallet = {'balance': '10.00', 'minimumWalletBalance': '50.00'};
+    await _pumpAvailability(tester, api);
+
+    expect(
+      find.text('رصيدك ج.م 10.00 أقل من الحد الأدنى ج.م 50.00'),
+      findsOneWidget,
+    );
+    expect(find.text('شحن الرصيد'), findsOneWidget);
+
+    await tester.tap(find.text('شحن الرصيد'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('WALLET'), findsOneWidget);
   });
 
   testWidgets('offline captain sees the empty state instead of the feed', (
@@ -358,6 +392,10 @@ Future<void> _pumpAvailability(
         builder: (context, state) =>
             Scaffold(body: Text('TRIP ${state.pathParameters['id']}')),
       ),
+      GoRoute(
+        path: '/wallet',
+        builder: (context, state) => const Scaffold(body: Text('WALLET')),
+      ),
     ],
   );
   await tester.pumpWidget(
@@ -403,14 +441,20 @@ class _FakeApi extends ApiClient {
     'radiusBand': {'min': 0.5, 'max': 15},
   };
   List<Map<String, dynamic>> orders = [];
+  Map<String, dynamic> wallet = {
+    'balance': '100.00',
+    'minimumWalletBalance': '50.00',
+  };
 
   @override
   Future<Map<String, dynamic>> getMap(
     String path, {
     Map<String, dynamic>? query,
-  }) async => path == '/captains/me'
-      ? Map<String, dynamic>.from(profile)
-      : <String, dynamic>{};
+  }) async => switch (path) {
+    '/captains/me' => Map<String, dynamic>.from(profile),
+    '/captains/wallet' => Map<String, dynamic>.from(wallet),
+    _ => <String, dynamic>{},
+  };
 
   @override
   Future<List<dynamic>> getList(

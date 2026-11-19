@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 
 import '../core/api_client.dart';
 import '../core/json_utils.dart';
+import '../core/texts.dart';
 
 const _reviewGreen = Color(0xFF19785F);
 const _reviewInk = Color(0xFF23362C);
@@ -143,16 +144,21 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
     _ => 'شحنة',
   };
 
-  String _amount(Object? value) =>
-      asDoubleOrNull(value)?.toStringAsFixed(2) ?? '--';
-
-  String _arCurrency(Object? currency) =>
-      currency?.toString() == 'EGP' ? 'ج.م' : '${currency ?? ''}';
+  /// One money format for every screen: localised currency first, two decimals.
+  /// A non-EGP API currency is still honoured, using the same shape.
+  String _money(Object? value, Object? currency) {
+    final amount = asDoubleOrNull(value);
+    if (amount == null) return '—';
+    final code = currency?.toString().trim().toUpperCase();
+    if (code == null || code.isEmpty || code == 'EGP') {
+      return moneyLabel(amount);
+    }
+    return '$code ${amount.toStringAsFixed(2)}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final currency = _arCurrency(widget.quote['currency']);
-    final price = _amount(widget.quote['price']);
+    final price = _money(widget.quote['price'], widget.quote['currency']);
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -201,13 +207,13 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
                   const Divider(height: 24),
                   _ReviewRow(
                     label: 'رسوم التوصيل',
-                    value: '$price $currency',
+                    value: price,
                     icon: Icons.local_shipping_outlined,
                   ),
                   const Divider(height: 24),
                   _ReviewRow(
                     label: 'الإجمالي',
-                    value: '$price $currency',
+                    value: price,
                     icon: Icons.receipt_long_outlined,
                     emphasize: true,
                   ),

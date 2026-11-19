@@ -54,9 +54,9 @@ void main() {
 
     expect(find.text('ملخص الأرباح المتوقعة'), findsOneWidget);
     expect(find.text('صافي ربحك'), findsOneWidget);
-    expect(find.text('EGP 39.44'), findsOneWidget);
-    expect(find.text('- EGP 3.94'), findsOneWidget);
-    expect(find.text('EGP 35.50'), findsOneWidget);
+    expect(find.text('ج.م 39.44'), findsOneWidget);
+    expect(find.text('- ج.م 3.94'), findsOneWidget);
+    expect(find.text('ج.م 35.50'), findsOneWidget);
     expect(find.text('3.4 كم'), findsOneWidget);
     expect(
       find.text(

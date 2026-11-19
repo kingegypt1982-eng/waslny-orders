@@ -122,6 +122,11 @@ class _CaptainAvailabilityViewState
   double _minRadius = 0.5;
   double _maxRadius = 15;
 
+  /// Wallet snapshot shown above the feed so the captain can see why orders
+  /// may be paused (the server hides the feed below the minimum balance).
+  double? _balance;
+  double? _minimumBalance;
+
   List<Map<String, dynamic>> _orders = [];
   final Set<String> _busy = {};
   final Set<String> _everSeen = {};
@@ -225,6 +230,18 @@ class _CaptainAvailabilityViewState
         if (_maxRadius < _minRadius) _maxRadius = _minRadius;
         _radiusKm = _radiusKm.clamp(_minRadius, _maxRadius).toDouble();
       });
+
+      // A wallet failure must not hide the feed, so it has its own guard.
+      try {
+        final wallet = await api.getMap('/captains/wallet');
+        if (!mounted) return;
+        setState(() {
+          _balance = asDoubleOrNull(wallet['balance']);
+          _minimumBalance = asDoubleOrNull(wallet['minimumWalletBalance']);
+        });
+      } catch (_) {
+        // Keep the last known balance; the wallet screen shows the error.
+      }
 
       final point = _point;
       if (point == null) {
@@ -788,8 +805,62 @@ class _CaptainAvailabilityViewState
               ],
             ),
           ),
+          _balanceLine(),
           const Divider(height: 1),
           Expanded(child: _offerList(scrollController)),
+        ],
+      ),
+    );
+  }
+
+  /// Compact balance/minimum strip above the offers. Uses the shared money
+  /// formatter so the currency reads ج.م in Arabic and EGP in English, exactly
+  /// like the wallet, trip and order-review screens.
+  Widget _balanceLine() {
+    final balance = _balance;
+    final minimum = _minimumBalance;
+    if (balance == null || minimum == null) return const SizedBox.shrink();
+    final low = balance < minimum;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: low ? const Color(0xFFFDECEC) : Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: low ? _danger.withValues(alpha: 0.45) : _line,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.account_balance_wallet_outlined,
+            size: 16,
+            color: low ? _danger : _green,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              low
+                  ? 'رصيدك ${moneyLabel(balance)} أقل من الحد الأدنى ${moneyLabel(minimum)}'
+                  : 'الرصيد: ${moneyLabel(balance)} · الحد الأدنى: ${moneyLabel(minimum)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: low ? _danger : _muted,
+                fontWeight: low ? FontWeight.w700 : FontWeight.normal,
+              ),
+            ),
+          ),
+          if (low)
+            TextButton(
+              onPressed: () => context.push('/wallet'),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('شحن الرصيد'),
+            ),
         ],
       ),
     );
@@ -1099,7 +1170,7 @@ class _OfferCardState extends State<_OfferCard> {
                       ),
                     ),
                     Text(
-                      _money(price),
+                      moneyLabel(price),
                       style: const TextStyle(
                         color: _green,
                         fontWeight: FontWeight.w800,
@@ -1134,7 +1205,7 @@ class _OfferCardState extends State<_OfferCard> {
                 // there is no captain net-earnings field yet, so the net is
                 // derived here as price - commission.
                 Text(
-                  'صافي ربحك: ${_money(price - commission)}',
+                  'صافي ربحك: ${moneyLabel(price - commission)}',
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     color: _ink,
@@ -1198,12 +1269,6 @@ class _OfferCardState extends State<_OfferCard> {
     );
   }
 
-  String _money(double value) {
-    final rounded = value == value.roundToDouble()
-        ? value.toStringAsFixed(0)
-        : value.toStringAsFixed(2);
-    return 'EGP $rounded';
-  }
 }
 
 class _CaptainMarker extends StatelessWidget {

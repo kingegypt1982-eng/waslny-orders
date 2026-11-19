@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import '../core/api_client.dart';
 import '../core/json_utils.dart';
 import '../core/location_service.dart';
+import '../core/texts.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -414,9 +415,9 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
       title: completed ? 'ملخص الرحلة والأرباح' : 'ملخص الأرباح المتوقعة',
       child: Column(
         children: [
-          _infoRow('رسوم التوصيل', _egp(price)),
+          _infoRow('رسوم التوصيل', moneyLabel(price)),
           const SizedBox(height: 6),
-          _infoRow('عمولة الشركة', '- ${_egp(commission)}'),
+          _infoRow('عمولة الشركة', '- ${moneyLabel(commission)}'),
           const Divider(height: 20),
           Row(
             children: [
@@ -427,7 +428,7 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
                 ),
               ),
               Text(
-                _egp(price - commission),
+                moneyLabel(price - commission),
                 style: const TextStyle(
                   fontWeight: FontWeight.w800,
                   color: _green,
@@ -603,11 +604,4 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   }
 
   String _proofLabel(String type) => type == 'PICKUP' ? 'صورة الاستلام' : 'صورة التسليم';
-
-  String _egp(double value) {
-    final rounded = value == value.roundToDouble()
-        ? value.toStringAsFixed(0)
-        : value.toStringAsFixed(2);
-    return 'EGP $rounded';
-  }
 }

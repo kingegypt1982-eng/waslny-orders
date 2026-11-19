@@ -2677,7 +2677,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
           content: TextField(
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
-              labelText: tr(ar: 'المبلغ بالجنيه', en: 'Amount in EGP'),
+              labelText: tr(
+                ar: 'المبلغ بالجنيه',
+                en: 'Amount in ${currencyLabel()}',
+              ),
             ),
             onChanged: (value) => text = value,
             onSubmitted: (value) =>
@@ -2703,7 +2706,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
           context,
           tr(
             ar: 'أدخل مبلغًا لا يقل عن ١ جنيه.',
-            en: 'Enter an amount of at least 1 EGP.',
+            en: 'Enter an amount of at least 1 ${currencyLabel()}.',
           ),
         );
         return;
@@ -3145,8 +3148,8 @@ class _PendingTopUpBanner extends StatelessWidget {
                     : tr(
                         ar: 'في انتظار تأكيد شحن $credit…',
                         en:
-                            'Waiting for the EGP $credit top-up to be '
-                            'confirmed…',
+                            'Waiting for the ${currencyLabel()} $credit top-up '
+                            'to be confirmed…',
                       ),
                 style: const TextStyle(color: _ink, fontSize: 12),
               ),
@@ -3347,11 +3350,11 @@ class _RouteLine extends StatelessWidget {
 
 double _toDouble(Object? value) => asDouble(value);
 
-/// Client-facing amount in Arabic pounds (history + other client screens).
-/// Captain wallet/cards intentionally keep "EGP".
+/// Every money display goes through [moneyLabel], so the currency and the
+/// two-decimal format are identical on client and captain screens.
 String _arEgp(Object? value) {
   if (value == null) return '—';
-  return '${_toDouble(value).toStringAsFixed(2)} ج.م';
+  return moneyLabel(_toDouble(value));
 }
 
 class _PrimaryButton extends StatelessWidget {
