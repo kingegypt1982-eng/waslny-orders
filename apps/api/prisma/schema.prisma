@@ -282,7 +282,7 @@ model Order {
   skips             OrderSkip[]
   policyAcknowledgements PolicyAcknowledgement[]
   purchaseInvoice   PurchaseInvoice?
-  rating            OrderRating?
+  ratings           OrderRating[]
   estimatedBudget   Decimal?         @db.Decimal(12, 2)
 
   @@index([status, createdAt])
@@ -290,19 +290,21 @@ model Order {
   @@index([captainId, status])
 }
 
-/// One client rating per completed order. Created only from DELIVERED -> COMPLETED
-/// confirmation; never affects commission or wallet balances.
+/// One rating per party (client and captain) per delivered/completed order.
+/// `rateeId` is always derived by the server from the order. Ratings never
+/// affect commission or wallet balances; only the captain's profile average.
 model OrderRating {
   id        String   @id @default(cuid())
-  orderId   String   @unique
-  clientId  String
-  captainId String
-  score     Int
+  orderId   String
+  raterId   String
+  rateeId   String
+  stars     Int
   comment   String?
   createdAt DateTime @default(now())
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  @@index([captainId, createdAt])
+  @@unique([orderId, raterId])
+  @@index([rateeId, createdAt])
 }
 
 /**

@@ -108,8 +108,8 @@ export class OrdersController {
   @Get(':id/location') tripLocation(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) {
     return this.orders.tripLocationForUser(id, user);
   }
-  @Post(':id/rating') @Roles('CLIENT') rate(@Param('id') id: string, @CurrentUser() user: { id: string }, @Body() body: RateOrderDto) {
-    return this.orders.rateOrder(id, user.id, body);
+  @Post(':id/rating') @Roles('CLIENT', 'CAPTAIN') rate(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' }, @Body() body: RateOrderDto) {
+    return this.orders.rateOrder(id, user, body);
   }
   @Get(':id/rating') rating(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) {
     return this.orders.ratingForUser(id, user);

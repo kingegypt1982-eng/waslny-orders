@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Logger, UnprocessableEntityException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { validate } from 'class-validator';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { RateOrderDto } from './dto/rate-order.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,11 +15,12 @@ describe('Order flow phase 2 guards, location and rating', () => {
     order: { findUnique: jest.fn(), updateMany: jest.fn(), update: jest.fn(), create: jest.fn() },
     orderEvent: { create: jest.fn().mockResolvedValue({ id: 'e1' }) },
     orderSkip: { deleteMany: jest.fn(), upsert: jest.fn() },
-    captainProfile: { findUnique: jest.fn(), update: jest.fn() },
+    captainProfile: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     pricingSettings: { upsert: jest.fn() },
     wallet: { updateMany: jest.fn(), update: jest.fn() },
     walletTransaction: { create: jest.fn() },
     user: { findUnique: jest.fn() },
+    orderRating: { create: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), aggregate: jest.fn() },
   };
   const prisma: any = {
     $transaction: jest.fn(async (cb: any) => cb(tx)),
@@ -26,6 +32,7 @@ describe('Order flow phase 2 guards, location and rating', () => {
     pricingSettings: { upsert: jest.fn() },
     user: { findUnique: jest.fn() },
     wallet: { findUnique: jest.fn() },
+    orderRating: { findUnique: jest.fn(), findFirst: jest.fn() },
   };
   const redis: any = { updateCaptainLocation: jest.fn().mockResolvedValue(true), nearbyCaptains: jest.fn() };
   const notifications: any = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
@@ -50,6 +57,16 @@ describe('Order flow phase 2 guards, location and rating', () => {
     tx.user.findUnique.mockResolvedValue({ phone: '+201000000000' });
     notifications.create.mockResolvedValue({ id: 'n1' });
     redis.updateCaptainLocation.mockResolvedValue(true);
+    prisma.orderRating.findUnique.mockResolvedValue(null);
+    prisma.orderRating.findFirst.mockResolvedValue(null);
+    tx.orderRating.findUnique.mockResolvedValue(null);
+    tx.orderRating.create.mockImplementation(async ({ data }: any) => ({
+      id: 'r1',
+      createdAt: new Date('2026-11-20T00:00:00.000Z'),
+      ...data,
+    }));
+    tx.orderRating.aggregate.mockResolvedValue({ _avg: { stars: 4 } });
+    tx.captainProfile.updateMany.mockResolvedValue({ count: 1 });
   });
 
   it('returns 409 on a second accept instead of debiting the wallet twice', async () => {
@@ -97,24 +114,160 @@ describe('Order flow phase 2 guards, location and rating', () => {
     await expect(service.tripLocationForUser('o1', { id: 'other', role: 'CLIENT' } as any)).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('rates only a completed order and only once', async () => {
-    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
-    await expect(service.rateOrder('o1', 'cl1', { score: 5 })).rejects.toBeInstanceOf(UnprocessableEntityException);
-
-    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'COMPLETED', captainId: 'cap1', clientId: 'cl1' });
-    await expect(service.rateOrder('o1', 'cl1', { score: 4, comment: ' great ' })).resolves.toEqual(
-      expect.objectContaining({ orderId: 'o1', captainId: 'cap1', score: 4, comment: 'great' }),
+  it('migrates the existing rating table in place instead of creating a parallel one', () => {
+    const migration = readFileSync(
+      resolve(__dirname, '../../prisma/migrations/20261120100000_migrate_order_ratings_to_stars_two_parties/migration.sql'),
+      'utf8',
     );
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    const schema = readFileSync(resolve(__dirname, '../../prisma/schema.prisma'), 'utf8');
 
-    prisma.$queryRaw.mockResolvedValueOnce([{ id: 'r1' }]);
-    await expect(service.rateOrder('o1', 'cl1', { score: 3 })).rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(migration).toContain('ALTER TABLE "OrderRating" RENAME COLUMN "score" TO "stars"');
+    expect(migration).toContain('ALTER TABLE "OrderRating" RENAME COLUMN "clientId" TO "raterId"');
+    expect(migration).toContain('ALTER TABLE "OrderRating" RENAME COLUMN "captainId" TO "rateeId"');
+    expect(migration).not.toMatch(/DROP TABLE|CREATE TABLE "OrderRating"/i);
+    expect(migration).toContain('("orderId", "raterId")');
+    expect(migration).toContain('AVG("stars")');
+    expect(migration).toContain('UPDATE "CaptainProfile"');
+    expect(schema).toContain('@@unique([orderId, raterId])');
+    expect(schema).not.toMatch(/^\s*score\s+Int/m);
   });
 
-  it('returns null when a completed order has no rating yet', async () => {
+  it('rejects ratings outside DELIVERED/COMPLETED, including CANCELLED', async () => {
+    for (const status of ['PENDING', 'ON_THE_WAY', 'CANCELLED']) {
+      prisma.order.findUnique.mockResolvedValue({ id: 'o1', status, captainId: 'cap1', clientId: 'cl1' });
+      await expect(
+        service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, { stars: 5 }),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    }
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'CANCELLED', captainId: 'cap1', clientId: 'cl1' });
+    await expect(
+      service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, { stars: 5 }),
+    ).rejects.toThrow('Cancelled orders cannot be rated');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('accepts ratings after DELIVERED and COMPLETED', async () => {
+    for (const status of ['DELIVERED', 'COMPLETED']) {
+      prisma.order.findUnique.mockResolvedValue({ id: 'o1', status, captainId: 'cap1', clientId: 'cl1' });
+      await expect(
+        service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, { stars: 5 }),
+      ).resolves.toEqual(expect.objectContaining({ stars: 5 }));
+    }
+  });
+
+  it('forbids a rating from a user not linked to the order', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
+    await expect(
+      service.rateOrder('o1', { id: 'outsider', role: 'CLIENT' } as any, { stars: 5 }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.orderRating.create).not.toHaveBeenCalled();
+  });
+
+  it('derives rateeId from the order and recomputes the captain average from an aggregate in one transaction', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
+    // The stored average (3) differs from the new rating (4): a cumulative
+    // average would fail this assertion.
+    tx.orderRating.aggregate.mockResolvedValue({ _avg: { stars: 3 } });
+
+    const result = await service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, {
+      stars: 4,
+      rateeId: 'intruder',
+      comment: '  great  ',
+    } as any);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.orderRating.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ orderId: 'o1', raterId: 'cl1', rateeId: 'cap1', stars: 4, comment: 'great' }),
+    });
+    expect(tx.orderRating.aggregate).toHaveBeenCalledWith({ where: { rateeId: 'cap1' }, _avg: { stars: true } });
+    expect(tx.captainProfile.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'cap1' },
+      data: { rating: 3 },
+    });
+    expect(result).toEqual(expect.objectContaining({ rateeId: 'cap1', stars: 4 }));
+  });
+
+  it('lets the captain rate the client without touching any captain profile average', async () => {
     prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'COMPLETED', captainId: 'cap1', clientId: 'cl1' });
-    await expect(service.ratingForUser('o1', { id: 'cl1', role: 'CLIENT' } as any)).resolves.toBeNull();
+
+    await service.rateOrder('o1', { id: 'cap1', role: 'CAPTAIN' } as any, { stars: 2 });
+
+    expect(tx.orderRating.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ raterId: 'cap1', rateeId: 'cl1', stars: 2 }),
+    });
+    expect(tx.orderRating.aggregate).not.toHaveBeenCalled();
+    expect(tx.captainProfile.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a second rating from the same party', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
+    prisma.orderRating.findUnique.mockResolvedValue({ id: 'r0' });
+
+    await expect(
+      service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, { stars: 4 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.orderRating.findUnique).toHaveBeenCalledWith({
+      where: { orderId_raterId: { orderId: 'o1', raterId: 'cl1' } },
+    });
+    expect(tx.orderRating.create).not.toHaveBeenCalled();
+  });
+
+  it('maps a concurrent unique violation to a conflict', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
+    tx.orderRating.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('duplicate', { code: 'P2002', clientVersion: '6.19.3' }),
+    );
+
+    await expect(
+      service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, { stars: 4 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('accepts the deprecated score alias and logs a warning', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
+
+    await expect(
+      service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, { score: 4 } as any),
+    ).resolves.toEqual(expect.objectContaining({ stars: 4 }));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('deprecated'));
+    warn.mockRestore();
+  });
+
+  it('requires stars when the deprecated alias is absent', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
+    await expect(
+      service.rateOrder('o1', { id: 'cl1', role: 'CLIENT' } as any, {} as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('validates stars 1-5, the 500-character comment limit and a body-supplied rateeId', async () => {
+    expect(await validate(Object.assign(new RateOrderDto(), { stars: 6 }))).not.toHaveLength(0);
+    expect(await validate(Object.assign(new RateOrderDto(), { stars: 2.5 }))).not.toHaveLength(0);
+    expect(await validate(Object.assign(new RateOrderDto(), { stars: 5, comment: 'x'.repeat(501) }))).not.toHaveLength(0);
+    expect(await validate(Object.assign(new RateOrderDto(), { stars: 5, comment: 'x'.repeat(500) }))).toHaveLength(0);
+    const rateeErrors = await validate(Object.assign(new RateOrderDto(), { stars: 5, rateeId: 'intruder' }));
+    expect(rateeErrors.map((error) => error.property)).toContain('rateeId');
+  });
+
+  it('returns the caller own rating with a temporary score alias, or null', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED', captainId: 'cap1', clientId: 'cl1' });
+    prisma.orderRating.findFirst.mockResolvedValue({
+      id: 'r1', orderId: 'o1', raterId: 'cl1', rateeId: 'cap1', stars: 4, comment: 'ok', createdAt: new Date(),
+    });
+
+    await expect(
+      service.ratingForUser('o1', { id: 'cl1', role: 'CLIENT' } as any),
+    ).resolves.toEqual(expect.objectContaining({ stars: 4, score: 4 }));
+    expect(prisma.orderRating.findFirst).toHaveBeenCalledWith({
+      where: { orderId: 'o1', raterId: 'cl1' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    prisma.orderRating.findFirst.mockResolvedValue(null);
+    await expect(
+      service.ratingForUser('o1', { id: 'cl1', role: 'CLIENT' } as any),
+    ).resolves.toBeNull();
   });
 
   it('refunds the reserved commission when the client cancels before pickup', async () => {

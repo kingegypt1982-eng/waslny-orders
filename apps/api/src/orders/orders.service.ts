@@ -1,6 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { CaptainStatus, EventActor, NotificationType, OrderStatus, PolicyAcknowledgementType, Prisma, ProofType, PurchaseInvoiceStatus, ShipmentCategory, UserRole, WalletTransactionType } from '@prisma/client';
-import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
@@ -26,6 +25,8 @@ export function distanceKm(fromLat: number, fromLon: number, toLat: number, toLo
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
+
+const ratingLogger = new Logger('OrderRating');
 
 /** Statuses where a captain is on the way and must keep sending location. */
 export const ACTIVE_TRIP_STATUSES: OrderStatus[] = [
@@ -197,38 +198,85 @@ export class OrdersService {
     };
   }
 
-  /** One client rating, only after the client confirmed delivery. */
-  async rateOrder(orderId: string, clientId: string, input: RateOrderDto) {
+  /** Ratings use 1-5 stars. `score` is a temporary deprecated alias. */
+  private resolveStars(input: RateOrderDto): number {
+    let stars = input.stars;
+    if (stars === undefined && input.score !== undefined) {
+      ratingLogger.warn('`score` is deprecated on POST /orders/:id/rating; send `stars` (1-5) instead.');
+      stars = input.score;
+    }
+    if (stars === undefined) throw new BadRequestException('`stars` is required (1-5)');
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      throw new BadRequestException('`stars` must be an integer between 1 and 5');
+    }
+    if (input.comment && input.comment.trim().length > 500) {
+      throw new BadRequestException('`comment` must be at most 500 characters');
+    }
+    return stars;
+  }
+
+  /** One rating per party. The ratee is always derived from the order. */
+  async rateOrder(
+    orderId: string,
+    user: { id: string; role: UserRole },
+    input: RateOrderDto,
+  ) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
-    if (order.clientId !== clientId) throw new ForbiddenException();
-    if (order.status !== OrderStatus.COMPLETED) {
-      throw new UnprocessableEntityException('Only completed orders can be rated');
+
+    const isClient = order.clientId === user.id;
+    const isCaptain = !!order.captainId && order.captainId === user.id;
+    if (!isClient && !isCaptain) throw new ForbiddenException();
+
+    if (order.status === OrderStatus.CANCELLED) {
+      throw new UnprocessableEntityException('Cancelled orders cannot be rated');
     }
-    if (!order.captainId) throw new UnprocessableEntityException('This order has no captain to rate');
-    const existing = await this.prisma.$queryRaw<Array<{ id: string }>>`
-      SELECT "id" FROM "OrderRating" WHERE "orderId" = ${orderId} LIMIT 1`;
-    if (existing.length) throw new ConflictException('Order already rated');
-    const rating = {
-      id: randomUUID(),
-      orderId,
-      clientId,
-      captainId: order.captainId,
-      score: input.score,
-      comment: input.comment?.trim() || null,
-      createdAt: new Date(),
-    };
+    if (order.status !== OrderStatus.DELIVERED && order.status !== OrderStatus.COMPLETED) {
+      throw new UnprocessableEntityException('Only delivered or completed orders can be rated');
+    }
+
+    // The server derives the ratee; a body-supplied rateeId is ignored (and
+    // rejected by the DTO whitelist before it ever reaches this method).
+    const rateeId = isClient ? order.captainId : order.clientId;
+    if (!rateeId) throw new UnprocessableEntityException('This order has no counterpart to rate');
+
+    const stars = this.resolveStars(input);
+    const existing = await this.prisma.orderRating.findUnique({
+      where: { orderId_raterId: { orderId, raterId: user.id } },
+    });
+    if (existing) throw new ConflictException('You have already rated this order');
+
     try {
-      await this.prisma.$executeRaw`
-        INSERT INTO "OrderRating" ("id", "orderId", "clientId", "captainId", "score", "comment", "createdAt")
-        VALUES (${rating.id}, ${rating.orderId}, ${rating.clientId}, ${rating.captainId}, ${rating.score}, ${rating.comment}, ${rating.createdAt})`;
+      return await this.prisma.$transaction(async (tx) => {
+        const rating = await tx.orderRating.create({
+          data: {
+            orderId,
+            raterId: user.id,
+            rateeId,
+            stars,
+            comment: input.comment?.trim() || null,
+          },
+        });
+        if (rateeId === order.captainId) {
+          // Recompute from ALL of this captain's ratings inside the same
+          // transaction; never a running/cumulative average.
+          const aggregate = await tx.orderRating.aggregate({
+            where: { rateeId },
+            _avg: { stars: true },
+          });
+          await tx.captainProfile.updateMany({
+            where: { userId: rateeId },
+            data: { rating: round2(aggregate._avg.stars ?? 0) },
+          });
+        }
+        return rating;
+      });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Order already rated');
+        throw new ConflictException('You have already rated this order');
       }
       throw error;
     }
-    return rating;
   }
 
   async ratingForUser(orderId: string, user: { id: string; role: UserRole }) {
@@ -237,9 +285,25 @@ export class OrdersService {
     if (user.role !== UserRole.ADMIN && order.clientId !== user.id && order.captainId !== user.id) {
       throw new ForbiddenException();
     }
-    const rows = await this.prisma.$queryRaw<Array<{ id: string; score: number; comment: string | null; createdAt: Date }>>`
-      SELECT "id", "score", "comment", "createdAt" FROM "OrderRating" WHERE "orderId" = ${orderId} LIMIT 1`;
-    return rows[0] ?? null;
+    const rating = await this.prisma.orderRating.findFirst({
+      where: {
+        orderId,
+        ...(user.role === UserRole.ADMIN ? {} : { raterId: user.id }),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!rating) return null;
+    return {
+      id: rating.id,
+      orderId: rating.orderId,
+      raterId: rating.raterId,
+      rateeId: rating.rateeId,
+      stars: rating.stars,
+      // TODO(mobile phase C): read `stars`; `score` is a temporary alias.
+      score: rating.stars,
+      comment: rating.comment,
+      createdAt: rating.createdAt,
+    };
   }
 
   /**
