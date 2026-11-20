@@ -1,4 +1,8 @@
-export const PAYMENT_REDIRECT_PATH = '/payment-redirect';
+/**
+ * Flutter Web uses the default hash URL strategy, so a refresh at
+ * `<origin>/#/payment-redirect` is served by the same index.html.
+ */
+export const PAYMENT_REDIRECT_PATH = '/#/payment-redirect';
 
 /** Parses an http(s) origin. Anything else (custom schemes, garbage) -> null. */
 export function parseHttpOrigin(value: string | undefined | null): string | null {
@@ -39,7 +43,7 @@ export interface PaymentReturnInput {
 
 /**
  * URL the payer's browser returns to after paying: always
- * `<origin>/payment-redirect`.
+ * `<origin>/#/payment-redirect` (hash route, safe on refresh).
  *
  * Resolution order:
  *  1. the request Origin, but only when it is allow-listed (no open redirect);

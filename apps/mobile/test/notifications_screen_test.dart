@@ -44,7 +44,12 @@ void main() {
     addTearDown(router.dispose);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [apiClientProvider.overrideWithValue(api)],
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          sessionProvider.overrideWith(
+            (Ref ref) => null,
+          ),
+        ],
         child: MaterialApp.router(routerConfig: router),
       ),
     );
@@ -55,6 +60,62 @@ void main() {
 
     expect(api.patches, ['/notifications/n1/read']);
     expect(find.text('تتبع الطلب order-9'), findsOneWidget);
+  });
+
+  testWidgets('captain status notification opens the captain trip', (
+    tester,
+  ) async {
+    final api = _NotifApiClient(await _preferences());
+    await _pumpInbox(tester, api, role: 'CAPTAIN');
+
+    await tester.tap(find.text('تم قبول طلبك'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('رحلة order-9'), findsOneWidget);
+  });
+
+  testWidgets('document approval opens the documents review', (tester) async {
+    final api = _NotifApiClient(await _preferences())
+      ..items = [
+        {
+          'id': 'n3',
+          'title': 'تم اعتماد المستندات',
+          'body': 'يمكنك استقبال الطلبات',
+          'type': 'CAPTAIN',
+          'readAt': null,
+          'metadata': {'screen': 'CAPTAIN_REVIEW', 'status': 'ACTIVE'},
+          'createdAt': DateTime.now().toIso8601String(),
+        },
+      ];
+    await _pumpInbox(tester, api, role: 'CAPTAIN');
+
+    await tester.tap(find.text('تم اعتماد المستندات'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('مراجعة المستندات'), findsOneWidget);
+  });
+
+  testWidgets('new-order notification opens captain availability', (
+    tester,
+  ) async {
+    final api = _NotifApiClient(await _preferences())
+      ..items = [
+        {
+          'id': 'n4',
+          'title': 'طلب جديد',
+          'body': 'طلب بانتظار مندوب',
+          'type': 'ORDER',
+          'readAt': null,
+          'metadata': {'screen': 'NEW_ORDER'},
+          'createdAt': DateTime.now().toIso8601String(),
+        },
+      ];
+    await _pumpInbox(tester, api, role: 'CAPTAIN');
+
+    await tester.tap(find.text('طلب جديد'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('طلبات متاحة'), findsOneWidget);
   });
 
   testWidgets('mark all posts read-all and reloads', (tester) async {
@@ -115,15 +176,39 @@ GoRouter _router(_NotifApiClient api) => GoRouter(
       builder: (context, state) =>
           Scaffold(body: Text('تتبع الطلب ${state.pathParameters['id']}')),
     ),
+    GoRoute(
+      path: '/captain/trip/:id',
+      builder: (context, state) =>
+          Scaffold(body: Text('رحلة ${state.pathParameters['id']}')),
+    ),
+    GoRoute(
+      path: '/captain/availability',
+      builder: (context, state) =>
+          const Scaffold(body: Text('طلبات متاحة')),
+    ),
+    GoRoute(
+      path: '/captain-documents',
+      builder: (context, state) =>
+          const Scaffold(body: Text('مراجعة المستندات')),
+    ),
   ],
 );
 
-Future<void> _pumpInbox(WidgetTester tester, _NotifApiClient api) async {
+Future<void> _pumpInbox(
+  WidgetTester tester,
+  _NotifApiClient api, {
+  String? role,
+}) async {
   final router = _router(api);
   addTearDown(router.dispose);
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [apiClientProvider.overrideWithValue(api)],
+      overrides: [
+        apiClientProvider.overrideWithValue(api),
+        sessionProvider.overrideWith(
+          (Ref ref) => role == null ? null : <String, dynamic>{'role': role},
+        ),
+      ],
       child: MaterialApp.router(routerConfig: router),
     ),
   );

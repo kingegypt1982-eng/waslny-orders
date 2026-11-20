@@ -112,7 +112,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
       currency: 'EGP',
       orderRef: expect.stringMatching(/^topup_[0-9a-f]{32}$/),
       description: expect.stringContaining('topup_'),
-      redirectUrl: 'https://app.test/payment-redirect',
+      redirectUrl: 'https://app.test/#/payment-redirect',
       customer: { email: 'cap@test.com', reference: 'cap1' },
     });
     expect(prisma.topUp.create).toHaveBeenCalledWith({
@@ -134,7 +134,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     await service.createTopUp('cap1', 200, 'http://localhost:5173');
 
     expect(kashier.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ redirectUrl: 'http://localhost:5173/payment-redirect' }),
+      expect.objectContaining({ redirectUrl: 'http://localhost:5173/#/payment-redirect' }),
     );
   });
 
@@ -146,7 +146,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     await service.createTopUp('cap1', 200, 'https://evil.example/phish?next=1');
 
     expect(kashier.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ redirectUrl: 'http://localhost:5173/payment-redirect' }),
+      expect.objectContaining({ redirectUrl: 'http://localhost:5173/#/payment-redirect' }),
     );
   });
 

@@ -64,22 +64,44 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     }
   }
 
+  /// Maps API notification metadata to the screen that makes sense for the
+  /// current role. `extra.route` is respected when a future producer sends it.
+  String? _routeFor(Map<String, dynamic> item) {
+    final metadata = item['metadata'];
+    final meta = metadata is Map ? Map<String, dynamic>.from(metadata) : <String, dynamic>{};
+    final role = ref.read(sessionProvider)?['role']?.toString().toUpperCase();
+    final isCaptain = role == 'CAPTAIN';
+    final screen = meta['screen']?.toString().toUpperCase();
+    final explicitRoute = meta['route']?.toString();
+    if (explicitRoute != null && explicitRoute.isNotEmpty) return explicitRoute;
+
+    if (screen == 'CAPTAIN_REVIEW' ||
+        screen == 'DOCUMENT_APPROVED' ||
+        screen == 'DOCUMENT_REJECTED') {
+      return isCaptain ? '/captain-documents' : null;
+    }
+    if (screen == 'NEW_ORDER' || screen == 'AVAILABLE_ORDERS') {
+      return isCaptain ? '/captain/availability' : null;
+    }
+
+    final orderId = meta['orderId']?.toString();
+    if (orderId == null || orderId.isEmpty) return null;
+    return isCaptain ? '/captain/trip/$orderId' : '/track/$orderId';
+  }
+
   Future<void> _open(Map<String, dynamic> item) async {
     final id = item['id']?.toString();
     if (id != null && id.isNotEmpty) {
       try {
         await ref.read(apiClientProvider).patch('/notifications/$id/read');
       } catch (_) {
-        // Best effort: still open the order even if marking fails.
+        // Best effort: still open the target even if marking fails.
       }
       if (mounted) setState(() {});
       await _load();
     }
-    final metadata = item['metadata'];
-    final orderId = metadata is Map ? metadata['orderId']?.toString() : null;
-    if (orderId != null && orderId.isNotEmpty && mounted) {
-      context.push('/track/$orderId');
-    }
+    final route = _routeFor(item);
+    if (route != null && mounted) context.push(route);
   }
 
   @override
@@ -97,7 +119,8 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () => context.pop(),
+                      onPressed: () =>
+                          context.canPop() ? context.pop() : context.go('/'),
                       icon: const Icon(
                         Icons.arrow_back_rounded,
                         color: Colors.white,
@@ -221,8 +244,10 @@ class _NotificationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final unread = item['readAt'] == null;
     final metadata = item['metadata'];
-    final hasOrder =
-        metadata is Map && metadata['orderId']?.toString().isNotEmpty == true;
+    final hasLink = metadata is Map &&
+        (metadata['orderId']?.toString().isNotEmpty == true ||
+            metadata['screen']?.toString().isNotEmpty == true ||
+            metadata['route']?.toString().isNotEmpty == true);
     return Material(
       color: unread ? const Color(0xFF0D3038) : _nCard,
       borderRadius: BorderRadius.circular(16),
@@ -302,7 +327,7 @@ class _NotificationTile extends StatelessWidget {
                           _agoArabic(item['createdAt']),
                           style: const TextStyle(color: _nMuted, fontSize: 11),
                         ),
-                        if (hasOrder) ...[
+                        if (hasLink) ...[
                           const Spacer(),
                           const Icon(
                             Icons.arrow_back_ios_new_rounded,

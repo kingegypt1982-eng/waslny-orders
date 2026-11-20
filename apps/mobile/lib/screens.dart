@@ -10,6 +10,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'core/api_client.dart';
 import 'core/google_auth.dart';
+import 'core/post_login_route.dart';
+import 'core/route_payload.dart';
 import 'core/json_utils.dart';
 import 'core/texts.dart';
 import 'core/url_opener.dart';
@@ -241,8 +243,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         payload['user'] as Map,
       );
       if (mounted) {
-        context.go(
-          _register && _role == 'CAPTAIN' ? '/captain-documents' : '/',
+        await goToLandingRoute(
+          context,
+          ref,
+          Map<String, dynamic>.from(payload['user'] as Map),
+          freshCaptainRegistration: _register && _role == 'CAPTAIN',
         );
       }
     } catch (error) {
@@ -282,12 +287,14 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       await api.saveSession(payload);
       final user = Map<String, dynamic>.from(payload['user'] as Map);
       ref.read(sessionProvider.notifier).state = user;
-      // Only a fresh captain sign-up goes to the documents step; existing
-      // captains land on the home shell, which routes by account status
-      // (same behaviour as email sign-in).
+      // Only a fresh captain sign-up goes to the documents step. Existing
+      // users use the shared role/status resolver (active-trip restore included).
       if (mounted) {
-        context.go(
-          _register && user['role'] == 'CAPTAIN' ? '/captain-documents' : '/',
+        await goToLandingRoute(
+          context,
+          ref,
+          user,
+          freshCaptainRegistration: _register && user['role'] == 'CAPTAIN',
         );
       }
     } catch (error) {
@@ -304,7 +311,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     appBar: AppBar(
       title: const Text('Wasalny Orders'),
       leading: IconButton(
-        onPressed: () => context.pop(),
+        onPressed: () => context.canPop() ? context.pop() : context.go('/'),
         icon: const Icon(Icons.arrow_back),
       ),
     ),
@@ -807,7 +814,6 @@ class CaptainHome extends ConsumerWidget {
               _TopHeader(
                 title: 'Captain ${_firstName(user['name'] as String?)}',
                 subtitle: 'Your next delivery starts here.',
-                icon: Icons.notifications_none,
               ),
               const SizedBox(height: 18),
               const _CaptainStatusSection(),
@@ -1701,8 +1707,10 @@ class _CaptainDocumentsScreenState
     if (_submitting) return;
     if (_step > 0) {
       setState(() => _step--);
-    } else {
+    } else if (context.canPop()) {
       context.pop();
+    } else {
+      context.go('/');
     }
   }
 
@@ -2260,9 +2268,13 @@ class _CreateOrderScreenState extends ConsumerState<CreateOrderScreen> {
             },
           );
       if (mounted) {
+        final reviewPayload = <String, dynamic>{
+          'orderData': orderData,
+          'quote': quote,
+        };
         await context.push(
-          '/order-review',
-          extra: {'orderData': orderData, 'quote': quote},
+          '/order-review?payload=${encodeRoutePayload(reviewPayload)}',
+          extra: reviewPayload,
         );
       }
     } catch (_) {
@@ -3235,13 +3247,8 @@ class _TransactionRow extends StatelessWidget {
 }
 
 class _TopHeader extends StatelessWidget {
-  const _TopHeader({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-  });
+  const _TopHeader({required this.title, required this.subtitle});
   final String title, subtitle;
-  final IconData icon;
   @override
   Widget build(BuildContext context) => Row(
     children: [
@@ -3262,10 +3269,7 @@ class _TopHeader extends StatelessWidget {
           ],
         ),
       ),
-      IconButton(
-        onPressed: () {},
-        icon: Icon(icon, color: _ink),
-      ),
+      NotificationBell(iconColor: _ink, size: 22),
     ],
   );
 }

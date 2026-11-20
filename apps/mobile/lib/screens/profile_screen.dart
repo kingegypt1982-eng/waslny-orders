@@ -52,7 +52,7 @@ class ProfileScreen extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
     await ref.read(apiClientProvider).clearSession();
     ref.read(sessionProvider.notifier).state = null;
-    if (context.mounted) context.go('/');
+    if (context.mounted) context.go('/auth');
   }
 
   void _showHelp(BuildContext context) {

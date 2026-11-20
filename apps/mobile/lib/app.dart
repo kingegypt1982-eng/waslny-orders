@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
+import 'core/route_payload.dart';
 import 'core/texts.dart';
 import 'screens.dart';
 import 'screens/captain_availability_screen.dart';
@@ -15,6 +16,7 @@ import 'screens/tracking_screen.dart';
 import 'screens/order_review_screen.dart';
 import 'screens/payment_redirect_screen.dart';
 import 'screens/register_screen.dart';
+import 'screens/route_fallback_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
 
@@ -45,9 +47,38 @@ Future<void> bootstrap() async {
 
 final messagingReadyProvider = Provider<bool>((ref) => false);
 
-final routerProvider = Provider<GoRouter>(
-  (ref) => GoRouter(
+/// Route prefixes that require a signed-in user. Public entry points
+/// (`/splash`, `/auth`, `/register`, `/reset-password`, `/captain-start`,
+/// `/payment-redirect`, `/`) stay reachable for deep links and welcome pages.
+const _protectedRoutePrefixes = <String>[
+  '/new-order',
+  '/order-review',
+  '/captain/availability',
+  '/captain/trip',
+  '/track',
+  '/wallet',
+  '/notifications',
+  '/map-picker',
+];
+
+final routerProvider = Provider<GoRouter>((ref) {
+  // `redirect` runs synchronously from GoRouter's refresh listener. Calling
+  // `ref.read` there is unsafe while Riverpod is still notifying a dependency
+  // change (the provider is invalidated before it rebuilds). Keep a local
+  // snapshot instead; `listen` does not make this provider dirty.
+  Map<String, dynamic>? session;
+  ref.listen(sessionProvider, (_, next) => session = next);
+  session = ref.read(sessionProvider);
+
+  final router = GoRouter(
     initialLocation: '/splash',
+    refreshListenable: ref.read(authRevisionProvider),
+    redirect: (context, state) {
+      if (session != null) return null;
+      final path = state.uri.path;
+      if (_protectedRoutePrefixes.any(path.startsWith)) return '/auth';
+      return null;
+    },
     routes: [
       GoRoute(
         path: '/splash',
@@ -79,7 +110,8 @@ final routerProvider = Provider<GoRouter>(
         path: '/new-order',
         builder: (context, state) {
           final extra = state.extra;
-          final category = extra is Map ? extra['category'] : null;
+          final category = state.uri.queryParameters['category'] ??
+              (extra is Map ? extra['category'] : null);
           return CreateOrderScreen(
             initialCategory: category is String ? category : null,
           );
@@ -88,10 +120,19 @@ final routerProvider = Provider<GoRouter>(
       GoRoute(
         path: '/order-review',
         builder: (context, state) {
-          final extra = state.extra as Map;
+          final extra = state.extra;
+          final payload = decodeRoutePayload(
+                state.uri.queryParameters['payload'],
+              ) ??
+              (extra is Map ? Map<String, dynamic>.from(extra) : null);
+          final orderData = payload?['orderData'];
+          final quote = payload?['quote'];
+          if (orderData is! Map || quote is! Map) {
+            return const RouteFallbackScreen(target: '/new-order');
+          }
           return OrderReviewScreen(
-            orderData: Map<String, dynamic>.from(extra['orderData'] as Map),
-            quote: Map<String, dynamic>.from(extra['quote'] as Map),
+            orderData: Map<String, dynamic>.from(orderData),
+            quote: Map<String, dynamic>.from(quote),
           );
         },
       ),
@@ -136,8 +177,9 @@ final routerProvider = Provider<GoRouter>(
         builder: (context, state) => const NotificationsScreen(),
       ),
     ],
-  ),
-);
+  );
+  return router;
+});
 
 class WasalnyApp extends ConsumerWidget {
   const WasalnyApp({super.key});
@@ -145,6 +187,15 @@ class WasalnyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
+    ref.listen(sessionProvider, (_, _) {
+      ref.read(authRevisionProvider).bump();
+    });
+    ref.listen(unauthorizedProvider, (_, _) {
+      ref.read(sessionProvider.notifier).state = null;
+      if (router.routeInformationProvider.value.uri.path != '/auth') {
+        router.go('/auth');
+      }
+    });
     return ValueListenableBuilder<String>(
       valueListenable: appLanguage,
       builder: (context, language, _) => MaterialApp.router(

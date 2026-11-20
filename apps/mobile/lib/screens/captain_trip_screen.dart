@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -150,6 +151,10 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFFF7F8F5),
         appBar: AppBar(
+          leading: IconButton(
+            onPressed: () => context.canPop() ? context.pop() : context.go('/'),
+            icon: const Icon(Icons.arrow_back),
+          ),
           title: Text('الرحلة ${_order['reference'] ?? ''}'.trim()),
           backgroundColor: const Color(0xFFF7F8F5),
           foregroundColor: _ink,

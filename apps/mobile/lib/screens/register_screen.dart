@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/api_client.dart';
 import '../core/google_auth.dart';
+import '../core/post_login_route.dart';
 import '../core/texts.dart';
 
 enum AccountType { client, captain }
@@ -184,8 +185,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       await _acknowledgeTerms();
 
       if (mounted) {
-        context.go(
-          _accountType == AccountType.captain ? '/captain-documents' : '/',
+        await goToLandingRoute(
+          context,
+          ref,
+          Map<String, dynamic>.from(payload['user'] as Map),
+          freshCaptainRegistration: _accountType == AccountType.captain,
         );
       }
     } catch (error) {
@@ -244,8 +248,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       ref.read(sessionProvider.notifier).state = user;
       if (_termsAccepted) await _acknowledgeTerms();
       if (mounted) {
-        // Captains with missing data or documents land on documents next.
-        context.go(user['role'] == 'CAPTAIN' ? '/captain-documents' : '/');
+        // New captains still complete the documents wizard; existing users
+        // use the shared role/status resolver.
+        await goToLandingRoute(
+          context,
+          ref,
+          user,
+          freshCaptainRegistration: user['role'] == 'CAPTAIN',
+        );
       }
     } catch (error) {
       if (mounted) {

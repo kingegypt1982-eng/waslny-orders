@@ -292,7 +292,12 @@ export class AdminService {
         [CaptainStatus.SUSPENDED]: ['Account suspended', 'Your captain account was suspended. Please contact support.'],
       };
       const message = messages[status];
-      if (message) await this.notifications.create(userId, message[0], message[1], NotificationType.CAPTAIN);
+      if (message) {
+        await this.notifications.create(userId, message[0], message[1], NotificationType.CAPTAIN, {
+          screen: 'CAPTAIN_REVIEW',
+          status,
+        });
+      }
     } catch {
       // Notifications are non-critical.
     }

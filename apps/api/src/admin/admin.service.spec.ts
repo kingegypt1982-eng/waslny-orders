@@ -220,13 +220,19 @@ describe('AdminService', () => {
     prisma.captainProfile.update.mockResolvedValue({ userId: 'cap1', status: 'SUSPENDED' });
 
     await service.reviewCaptain('cap1', 'SUSPENDED' as any);
-    expect(notifications.create).toHaveBeenCalledWith('cap1', 'Account suspended', expect.any(String), 'CAPTAIN');
+    expect(notifications.create).toHaveBeenCalledWith('cap1', 'Account suspended', expect.any(String), 'CAPTAIN', {
+      screen: 'CAPTAIN_REVIEW',
+      status: 'SUSPENDED',
+    });
 
     prisma.captainProfile.findUnique.mockResolvedValue({ userId: 'cap1', status: 'SUSPENDED' });
     prisma.captainProfile.update.mockResolvedValue({ userId: 'cap1', status: 'ACTIVE' });
 
     await service.reviewCaptain('cap1', 'ACTIVE' as any);
-    expect(notifications.create).toHaveBeenCalledWith('cap1', 'Account restored', expect.any(String), 'CAPTAIN');
+    expect(notifications.create).toHaveBeenCalledWith('cap1', 'Account restored', expect.any(String), 'CAPTAIN', {
+      screen: 'CAPTAIN_REVIEW',
+      status: 'ACTIVE',
+    });
   });
 
     it('suspends and restores client accounts', async () => {

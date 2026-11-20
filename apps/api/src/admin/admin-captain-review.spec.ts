@@ -56,7 +56,10 @@ describe('AdminService captain review', () => {
         }),
       }),
     );
-    expect(notifications.create).toHaveBeenCalledWith('u1', 'Account approved', expect.any(String), 'CAPTAIN');
+    expect(notifications.create).toHaveBeenCalledWith('u1', 'Account approved', expect.any(String), 'CAPTAIN', {
+      screen: 'CAPTAIN_REVIEW',
+      status: 'ACTIVE',
+    });
   });
 
   it('blocks approval while a required document is missing', async () => {
@@ -84,6 +87,7 @@ describe('AdminService captain review', () => {
       'Application update',
       expect.stringContaining('License image is unreadable'),
       'CAPTAIN',
+      { screen: 'CAPTAIN_REVIEW', status: 'REJECTED' },
     );
   });
 
@@ -112,7 +116,10 @@ describe('AdminService captain review', () => {
     const result = await service.reviewCaptain('u1', CaptainStatus.ACTIVE);
 
     expect(result.status).toBe(CaptainStatus.ACTIVE);
-    expect(notifications.create).toHaveBeenCalledWith('u1', 'Account restored', expect.any(String), 'CAPTAIN');
+    expect(notifications.create).toHaveBeenCalledWith('u1', 'Account restored', expect.any(String), 'CAPTAIN', {
+      screen: 'CAPTAIN_REVIEW',
+      status: 'ACTIVE',
+    });
   });
 });
 

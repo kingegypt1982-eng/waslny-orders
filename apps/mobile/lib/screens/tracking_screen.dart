@@ -154,7 +154,7 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                 subtitle: order == null
                     ? '...'
                     : 'طلب ${order['reference'] ?? ''}',
-                onBack: () => context.pop(),
+                onBack: () => context.canPop() ? context.pop() : context.go('/'),
                 onRefresh: _load,
               ),
               if (order == null)

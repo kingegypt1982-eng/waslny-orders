@@ -381,9 +381,10 @@ class _WaslnyHomeScreenState extends State<WaslnyHomeScreen> {
                   borderRadius: BorderRadius.circular(17),
                   child: InkWell(
                     onTap: () {
+                      final category = item['category'] as String;
                       context.push(
-                        '/new-order',
-                        extra: {'category': item['category']},
+                        '/new-order?category=${Uri.encodeComponent(category)}',
+                        extra: {'category': category},
                       );
                     },
                     borderRadius: BorderRadius.circular(17),

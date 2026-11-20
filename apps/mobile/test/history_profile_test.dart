@@ -243,7 +243,7 @@ void main() {
 
       await tester.tap(find.text('تسجيل الخروج').last);
       await tester.pumpAndSettle();
-      expect(find.text('الصفحة الرئيسية'), findsOneWidget);
+      expect(find.text('شاشة الدخول'), findsOneWidget);
       expect(preferences.getString('session_user'), isNull);
     });
   });
@@ -297,6 +297,10 @@ GoRouter _profileRouter(_HPApiClient api) => GoRouter(
     GoRoute(
       path: '/profile',
       builder: (context, state) => const ProfileScreen(),
+    ),
+    GoRoute(
+      path: '/auth',
+      builder: (context, state) => const Scaffold(body: Text('شاشة الدخول')),
     ),
     GoRoute(
       path: '/notifications',

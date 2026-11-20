@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,6 +21,27 @@ final apiClientProvider = Provider<ApiClient>(
   (ref) => ApiClient(ref.watch(preferencesProvider)),
 );
 
+/// Signalled when the API answers 401. `WasalnyApp` listens and returns to
+/// /auth. A single top-level instance lets [ApiClient] notify without a ref.
+class UnauthorizedBus extends ChangeNotifier {
+  void signal() => notifyListeners();
+}
+
+final unauthorizedBus = UnauthorizedBus();
+
+final unauthorizedProvider = ChangeNotifierProvider<UnauthorizedBus>(
+  (ref) => unauthorizedBus,
+);
+
+/// Refreshes GoRouter when the Riverpod session changes (login/logout/401).
+class AuthRevision extends ChangeNotifier {
+  void bump() => notifyListeners();
+}
+
+final authRevisionProvider = ChangeNotifierProvider<AuthRevision>(
+  (ref) => AuthRevision(),
+);
+
 class ApiClient {
   ApiClient(this.preferences)
     : dio = Dio(
@@ -40,6 +61,17 @@ class ApiClient {
           final token = preferences.getString('access_token');
           if (token != null) options.headers['Authorization'] = 'Bearer $token';
           handler.next(options);
+        },
+        onError: (error, handler) {
+          final status = error.response?.statusCode;
+          final isAuthCall = error.requestOptions.path.startsWith('/auth/');
+          if (status == 401 && !isAuthCall) {
+            // Never log the token or response body; just drop the session.
+            preferences.remove('access_token');
+            preferences.remove('session_user');
+            unauthorizedBus.signal();
+          }
+          handler.reject(error);
         },
       ),
     );

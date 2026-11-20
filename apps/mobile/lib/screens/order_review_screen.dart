@@ -156,6 +156,9 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
     return '$code ${amount.toStringAsFixed(2)}';
   }
 
+  void _back() =>
+      context.canPop() ? context.pop() : context.go('/new-order');
+
   @override
   Widget build(BuildContext context) {
     final price = _money(widget.quote['price'], widget.quote['currency']);
@@ -166,7 +169,7 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
         appBar: AppBar(
           title: const Text('مراجعة السعر'),
           leading: IconButton(
-            onPressed: () => context.pop(),
+            onPressed: _back,
             icon: const Icon(Icons.arrow_back),
           ),
         ),
@@ -326,7 +329,7 @@ class _OrderReviewScreenState extends ConsumerState<OrderReviewScreen> {
               ),
               const SizedBox(height: 10),
               OutlinedButton(
-                onPressed: _busy ? null : () => context.pop(),
+                onPressed: _busy ? null : _back,
                 child: const Text('تعديل'),
               ),
             ],
