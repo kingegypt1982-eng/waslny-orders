@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { CaptainStatus, EventActor, NotificationType, OrderStatus, PolicyAcknowledgementType, Prisma, ProofType, PurchaseInvoiceStatus, ShipmentCategory, UserRole, WalletTransactionType } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
@@ -11,6 +12,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
 import { RespondInvoiceDto } from './dto/respond-invoice.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
+import { RateOrderDto } from './dto/rate-order.dto';
 import { DEFAULT_MAX_RADIUS_KM, DEFAULT_MIN_RADIUS_KM, ORDER_SEARCH_EXPIRY_MINUTES } from './orders.constants';
 import { ProofPhotoInput, resolveUploadPath, saveProofPhoto, toPosixPath } from './proof-upload';
 
@@ -24,6 +26,14 @@ export function distanceKm(fromLat: number, fromLon: number, toLat: number, toLo
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/** Statuses where a captain is on the way and must keep sending location. */
+export const ACTIVE_TRIP_STATUSES: OrderStatus[] = [
+  OrderStatus.ACCEPTED,
+  OrderStatus.ARRIVED_AT_PICKUP,
+  OrderStatus.PICKED_UP,
+  OrderStatus.ON_THE_WAY,
+];
 
 @Injectable()
 export class OrdersService {
@@ -105,23 +115,30 @@ export class OrdersService {
       throw ackRequired(PolicyAcknowledgementType.SENSITIVE_CATEGORY, { category: input.category });
     }
     const quote = await this.quote(input);
-    return this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({
+    const order = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.order.create({
         data: {
           clientId, ...input, description: input.description?.trim() || '', status: OrderStatus.SEARCHING_CAPTAIN,
           distanceKm: quote.distanceKm, price: quote.price, commission: quote.commission,
         },
       });
       await this.orderEvents.record(tx, {
-        orderId: order.id,
+        orderId: created.id,
         fromStatus: null,
         toStatus: OrderStatus.SEARCHING_CAPTAIN,
         actorId: clientId,
         actorRole: EventActor.CLIENT,
         note: 'Order created',
       });
-      return order;
+      return created;
     });
+    // Both sides get an in-app record: the client sees the created order, and
+    // captains see accepted/updated orders through their existing notifications.
+    await this.notify(clientId, 'تم إنشاء الطلب', `تم استلام الطلب ${order.reference} وجارٍ البحث عن مندوب.`, NotificationType.ORDER, {
+      orderId: order.id,
+      screen: 'ORDER_CREATED',
+    });
+    return order;
   }
 
   listForUser(user: { id: string; role: UserRole }) {
@@ -139,6 +156,90 @@ export class OrdersService {
       throw new ForbiddenException();
     }
     return order;
+  }
+
+  /** Captain heartbeat for one active trip. Coordinates live on the profile. */
+  async updateTripLocation(orderId: string, captainId: string, latitude: number, longitude: number) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.captainId !== captainId) throw new ForbiddenException();
+    if (!ACTIVE_TRIP_STATUSES.includes(order.status)) {
+      throw new UnprocessableEntityException('Location is tracked only during an active trip');
+    }
+    await this.prisma.captainProfile.update({
+      where: { userId: captainId },
+      data: { lastLat: latitude, lastLng: longitude, lastSeenAt: new Date() },
+    });
+    try {
+      await this.redis.updateCaptainLocation(captainId, latitude, longitude);
+    } catch {
+      // Redis is a best-effort geo index; PostgreSQL is authoritative.
+    }
+    return { updated: true };
+  }
+
+  /** Live captain marker for the client's tracking map. */
+  async tripLocationForUser(orderId: string, user: { id: string; role: UserRole }) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (user.role !== UserRole.ADMIN && order.clientId !== user.id && order.captainId !== user.id) {
+      throw new ForbiddenException();
+    }
+    if (!order.captainId) return { latitude: null, longitude: null, seenAt: null };
+    const profile = await this.prisma.captainProfile.findUnique({
+      where: { userId: order.captainId },
+      select: { lastLat: true, lastLng: true, lastSeenAt: true },
+    });
+    return {
+      latitude: profile?.lastLat ?? null,
+      longitude: profile?.lastLng ?? null,
+      seenAt: profile?.lastSeenAt ?? null,
+    };
+  }
+
+  /** One client rating, only after the client confirmed delivery. */
+  async rateOrder(orderId: string, clientId: string, input: RateOrderDto) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.clientId !== clientId) throw new ForbiddenException();
+    if (order.status !== OrderStatus.COMPLETED) {
+      throw new UnprocessableEntityException('Only completed orders can be rated');
+    }
+    if (!order.captainId) throw new UnprocessableEntityException('This order has no captain to rate');
+    const existing = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "OrderRating" WHERE "orderId" = ${orderId} LIMIT 1`;
+    if (existing.length) throw new ConflictException('Order already rated');
+    const rating = {
+      id: randomUUID(),
+      orderId,
+      clientId,
+      captainId: order.captainId,
+      score: input.score,
+      comment: input.comment?.trim() || null,
+      createdAt: new Date(),
+    };
+    try {
+      await this.prisma.$executeRaw`
+        INSERT INTO "OrderRating" ("id", "orderId", "clientId", "captainId", "score", "comment", "createdAt")
+        VALUES (${rating.id}, ${rating.orderId}, ${rating.clientId}, ${rating.captainId}, ${rating.score}, ${rating.comment}, ${rating.createdAt})`;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Order already rated');
+      }
+      throw error;
+    }
+    return rating;
+  }
+
+  async ratingForUser(orderId: string, user: { id: string; role: UserRole }) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (user.role !== UserRole.ADMIN && order.clientId !== user.id && order.captainId !== user.id) {
+      throw new ForbiddenException();
+    }
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; score: number; comment: string | null; createdAt: Date }>>`
+      SELECT "id", "score", "comment", "createdAt" FROM "OrderRating" WHERE "orderId" = ${orderId} LIMIT 1`;
+    return rows[0] ?? null;
   }
 
   /**
@@ -316,6 +417,10 @@ export class OrdersService {
     });
     if (order) {
       await this.notifyClient(order, 'تم قبول طلبك', `قبل المندوب الطلب ${order.reference} وهو في الطريق إلى موقع الاستلام.`);
+      await this.notify(captainId, 'تم قبول الطلب', `قبلت الطلب ${order.reference}. ابدأ التنقل إلى موقع الاستلام.`, NotificationType.ORDER, {
+        orderId: order.id,
+        screen: 'ORDER_ACCEPTED',
+      });
     }
     return order;
   }

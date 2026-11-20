@@ -3,8 +3,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/api_client.dart';
+import 'package:wasalny_orders/core/location_service.dart';
+import 'package:wasalny_orders/core/url_opener.dart';
 import 'package:wasalny_orders/screens/captain_trip_screen.dart';
 
 void main() {
@@ -104,6 +107,54 @@ void main() {
     );
   });
 
+  testWidgets('active trip sends a location heartbeat every 20 seconds', (
+    tester,
+  ) async {
+    final api = _FakeTripApi(await _preferences(), _order('ON_THE_WAY'));
+    await _pumpTrip(
+      tester,
+      api,
+      locationService: _FixedLocationService(const LatLng(30.05, 31.05)),
+    );
+
+    expect(api.postPaths, ['/orders/o1/location']);
+    expect(api.postData.single['latitude'], 30.05);
+    expect(api.postData.single['longitude'], 31.05);
+
+    await tester.pump(const Duration(seconds: 20));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(api.postPaths, hasLength(2));
+  });
+
+  testWidgets('accepted trip opens maps directions and a tel link', (
+    tester,
+  ) async {
+    final api = _FakeTripApi(await _preferences(), _order('ACCEPTED'));
+    final opened = <Uri>[];
+    await _pumpTrip(
+      tester,
+      api,
+      locationService: _FixedLocationService(const LatLng(30.05, 31.05)),
+      urlOpener: (uri) async {
+        opened.add(uri);
+        return true;
+      },
+    );
+
+    await tester.tap(find.byKey(const ValueKey('trip-navigate-button')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('trip-call-button')));
+    await tester.pump();
+
+    expect(opened, hasLength(2));
+    expect(opened.first.host, 'www.google.com');
+    expect(opened.first.path, '/maps/dir/');
+    expect(opened.first.queryParameters['origin'], '30.05,31.05');
+    expect(opened.first.queryParameters['destination'], '30.0,31.0');
+    expect(opened.last.scheme, 'tel');
+    expect(opened.last.path, '01000000000');
+  });
+
   testWidgets('cancelled trip hides every action button', (tester) async {
     final api = _FakeTripApi(await _preferences(), _order('CANCELLED'));
     await _pumpTrip(tester, api);
@@ -129,23 +180,39 @@ Map<String, dynamic> _order(String status) => {
   'price': '39.44',
   'commission': '3.94',
   'distanceKm': '3.4',
+  'pickupLatitude': 30.0,
+  'pickupLongitude': 31.0,
+  'deliveryLatitude': 30.1,
+  'deliveryLongitude': 31.1,
   'pickupLabel': 'نقطة الاستلام',
   'deliveryLabel': 'نقطة التسليم',
   'recipientName': 'أحمد',
   'recipientPhone': '01000000000',
 };
 
-Future<void> _pumpTrip(WidgetTester tester, _FakeTripApi api) async {
+Future<void> _pumpTrip(
+  WidgetTester tester,
+  _FakeTripApi api, {
+  LocationService? locationService,
+  UrlOpener? urlOpener,
+}) async {
   tester.view.physicalSize = const Size(800, 1600);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+  final overrides = <Override>[
+    preferencesProvider.overrideWithValue(api.preferences),
+    apiClientProvider.overrideWithValue(api),
+  ];
+  if (locationService != null) {
+    overrides.add(locationServiceProvider.overrideWithValue(locationService));
+  }
+  if (urlOpener != null) {
+    overrides.add(urlOpenerProvider.overrideWithValue(urlOpener));
+  }
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [
-        preferencesProvider.overrideWithValue(api.preferences),
-        apiClientProvider.overrideWithValue(api),
-      ],
+      overrides: overrides,
       child: const MaterialApp(home: CaptainTripScreen(orderId: 'o1')),
     ),
   );
@@ -153,11 +220,21 @@ Future<void> _pumpTrip(WidgetTester tester, _FakeTripApi api) async {
   await tester.pump(const Duration(milliseconds: 50));
 }
 
+class _FixedLocationService implements LocationService {
+  const _FixedLocationService(this.point);
+  final LatLng point;
+
+  @override
+  Future<LocationResult> current() async => LocationResult.ok(point);
+}
+
 class _FakeTripApi extends ApiClient {
   _FakeTripApi(super.preferences, this.order);
 
   final Map<String, dynamic> order;
   final patchCalls = <Map<String, dynamic>>[];
+  final postPaths = <String>[];
+  final postData = <Map<String, dynamic>>[];
   List<dynamic> events = [];
   List<dynamic> proofs = [];
 
@@ -178,6 +255,13 @@ class _FakeTripApi extends ApiClient {
     final body = data is Map ? Map<String, dynamic>.from(data) : {};
     patchCalls.add({'path': path, ...body});
     if (body['status'] is String) order['status'] = body['status'] as String;
+    return <String, dynamic>{};
+  }
+
+  @override
+  Future<Map<String, dynamic>> post(String path, {Object? data}) async {
+    postPaths.add(path);
+    postData.add(data is Map ? Map<String, dynamic>.from(data) : {});
     return <String, dynamic>{};
   }
 }

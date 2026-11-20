@@ -44,6 +44,68 @@ void main() {
     );
   });
 
+  testWidgets('live captain marker is added to the tracking map', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TrackingApiClient(await _preferences())
+      ..order['status'] = 'ON_THE_WAY'
+      ..order['captainId'] = 'captain-1'
+      ..liveLocation = {
+        'latitude': 30.05,
+        'longitude': 31.05,
+        'seenAt': '2026-11-20T10:30:00.000Z',
+      };
+    await _pumpTracking(tester, api);
+
+    final markers = tester.widget<MarkerLayer>(find.byType(MarkerLayer)).markers;
+    expect(markers, hasLength(3));
+    expect(
+      markers.any((marker) => marker.key == const ValueKey('live-captain-marker')),
+      isTrue,
+    );
+    expect(find.textContaining('آخر تحديث للموقع'), findsOneWidget);
+    expect(
+      api.getPaths,
+      contains('/orders/order-1/location'),
+    );
+  });
+
+  testWidgets('client rates a completed order once', (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TrackingApiClient(await _preferences())
+      ..order['status'] = 'COMPLETED'
+      ..order['captainId'] = 'captain-1';
+    await _pumpTracking(tester, api);
+
+    expect(find.byKey(const ValueKey('submit-rating-button')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('rating-star-4')));
+    await tester.enterText(
+      find.byKey(const ValueKey('rating-comment-field')),
+      'ممتاز',
+    );
+    await tester.tap(find.byKey(const ValueKey('submit-rating-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.postPaths, ['/orders/order-1/rating']);
+    expect(api.ratingPosts.single, {
+      'score': 4,
+      'comment': 'ممتاز',
+    });
+    expect(find.text('تقييمك لهذه الرحلة'), findsOneWidget);
+    expect(find.text('4 من 5'), findsOneWidget);
+    expect(find.byKey(const ValueKey('submit-rating-button')), findsNothing);
+  });
+
   testWidgets('client confirms searching order cancellation once', (
     tester,
   ) async {
@@ -101,6 +163,10 @@ class _TrackingApiClient extends ApiClient {
   _TrackingApiClient(super.preferences);
 
   final postPaths = <String>[];
+  final getPaths = <String>[];
+  final ratingPosts = <Map<String, dynamic>>[];
+  Map<String, dynamic>? liveLocation;
+  Map<String, dynamic>? savedRating;
   Completer<Map<String, dynamic>>? cancelCompleter;
   final order = <String, dynamic>{
     'id': 'order-1',
@@ -122,11 +188,29 @@ class _TrackingApiClient extends ApiClient {
   Future<Map<String, dynamic>> getMap(
     String path, {
     Map<String, dynamic>? query,
-  }) async => Map<String, dynamic>.from(order);
+  }) async {
+    getPaths.add(path);
+    if (path.endsWith('/location')) {
+      return liveLocation == null
+          ? <String, dynamic>{}
+          : Map<String, dynamic>.from(liveLocation!);
+    }
+    if (path.endsWith('/rating')) {
+      return savedRating == null
+          ? <String, dynamic>{}
+          : Map<String, dynamic>.from(savedRating!);
+    }
+    return Map<String, dynamic>.from(order);
+  }
 
   @override
   Future<Map<String, dynamic>> post(String path, {Object? data}) {
     postPaths.add(path);
+    if (path.endsWith('/rating')) {
+      ratingPosts.add(data is Map ? Map<String, dynamic>.from(data) : {});
+      savedRating = {'score': ratingPosts.last['score'], 'comment': ratingPosts.last['comment']};
+      return Future.value(Map<String, dynamic>.from(savedRating!));
+    }
     if (cancelCompleter != null) return cancelCompleter!.future;
     return Future.value(Map<String, dynamic>.from(order));
   }

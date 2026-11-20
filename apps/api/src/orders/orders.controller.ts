@@ -15,6 +15,8 @@ import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
 import { RespondInvoiceDto } from './dto/respond-invoice.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { LocationDto } from './dto/order-location.dto';
+import { RateOrderDto } from './dto/rate-order.dto';
 import { PROOF_MAX_BYTES } from './proof-upload';
 import { OrdersService } from './orders.service';
 
@@ -100,6 +102,18 @@ export class OrdersController {
     });
   }
   @Get(':id/events') events(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) { return this.orders.eventsForUser(id, user); }
+  @Post(':id/location') @Roles('CAPTAIN') updateLocation(@Param('id') id: string, @CurrentUser() user: { id: string }, @Body() body: LocationDto) {
+    return this.orders.updateTripLocation(id, user.id, body.latitude, body.longitude);
+  }
+  @Get(':id/location') tripLocation(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) {
+    return this.orders.tripLocationForUser(id, user);
+  }
+  @Post(':id/rating') @Roles('CLIENT') rate(@Param('id') id: string, @CurrentUser() user: { id: string }, @Body() body: RateOrderDto) {
+    return this.orders.rateOrder(id, user.id, body);
+  }
+  @Get(':id/rating') rating(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) {
+    return this.orders.ratingForUser(id, user);
+  }
   @Get(':id') get(@Param('id') id: string, @CurrentUser() user: { id: string; role: 'CLIENT' | 'CAPTAIN' | 'ADMIN' }) { return this.orders.getForUser(id, user); }
 }
 

@@ -11,6 +11,7 @@ import '../core/api_client.dart';
 import '../core/json_utils.dart';
 import '../core/location_service.dart';
 import '../core/texts.dart';
+import '../core/url_opener.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -36,6 +37,13 @@ class CaptainTripScreen extends ConsumerStatefulWidget {
 
 class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   static const _pollInterval = Duration(seconds: 10);
+  static const _heartbeatInterval = Duration(seconds: 20);
+  static const _activeTripStatuses = <String>{
+    'ACCEPTED',
+    'ARRIVED_AT_PICKUP',
+    'PICKED_UP',
+    'ON_THE_WAY',
+  };
 
   static const _statusLabels = <String, String>{
     'PENDING': 'بانتظار مندوب',
@@ -50,6 +58,8 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   };
 
   Timer? _timer;
+  Timer? _heartbeatTimer;
+  bool _sendingHeartbeat = false;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -65,11 +75,18 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
       if (!mounted || _busy || _loading) return;
       _load(silent: true);
     });
+    // The server needs a fresh captain position for the client's live map.
+    // 20 seconds matches the availability heartbeat and stays inside the
+    // global API rate limit for a single trip.
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+      _sendHeartbeat();
+    });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _heartbeatTimer?.cancel();
     super.dispose();
   }
 
@@ -92,6 +109,9 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
         _events = results[1] as List<dynamic>;
         _proofs = results[2] as List<dynamic>;
       });
+      // Send one immediate fix when the trip is first shown (or refreshed);
+      // the 20-second timer covers the rest of the journey.
+      if (!silent) _sendHeartbeat();
     } catch (error) {
       if (!mounted) return;
       if (silent) return;
@@ -100,6 +120,59 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
         _error = ApiClient.errorMessage(error);
       });
     }
+  }
+
+  /// Best-effort position update for the trip. A missing GPS fix or a network
+  /// blip never interrupts the captain; PostgreSQL keeps the last good point.
+  Future<void> _sendHeartbeat() async {
+    if (!mounted || _sendingHeartbeat || !_activeTripStatuses.contains(_status)) {
+      return;
+    }
+    _sendingHeartbeat = true;
+    try {
+      final result = await ref.read(locationServiceProvider).current();
+      final point = result.point;
+      if (point == null) return;
+      ref.read(captainLocationProvider.notifier).state = point;
+      await ref.read(apiClientProvider).post(
+            '/orders/${widget.orderId}/location',
+            data: {'latitude': point.latitude, 'longitude': point.longitude},
+          );
+    } catch (_) {
+      // Heartbeats are telemetry, not a user action: retry on the next tick.
+    } finally {
+      _sendingHeartbeat = false;
+    }
+  }
+
+  Future<void> _openNavigation() async {
+    final target = _navigationTarget();
+    if (target == null) return;
+    final origin = ref.read(captainLocationProvider);
+    await ref.read(urlOpenerProvider)(mapsDirectionsUri(
+      destinationLatitude: target.latitude,
+      destinationLongitude: target.longitude,
+      originLatitude: origin?.latitude,
+      originLongitude: origin?.longitude,
+    ));
+  }
+
+  Future<void> _callRecipient() async {
+    final phone = _order['recipientPhone']?.toString().trim() ?? '';
+    if (phone.isEmpty) {
+      _toast('لا يوجد رقم هاتف للمستلم');
+      return;
+    }
+    await ref.read(urlOpenerProvider)(telephoneUri(phone));
+  }
+
+  /// Pickup while heading to collection, delivery once the parcel is picked up.
+  LatLng? _navigationTarget() {
+    final toPickup = _status == 'ACCEPTED' || _status == 'ARRIVED_AT_PICKUP';
+    return _point(
+      _order[toPickup ? 'pickupLatitude' : 'deliveryLatitude'],
+      _order[toPickup ? 'pickupLongitude' : 'deliveryLongitude'],
+    );
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -173,6 +246,10 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
                         padding: const EdgeInsets.fromLTRB(18, 14, 18, 26),
                         children: [
                           _statusCard(),
+                          if (_activeTripStatuses.contains(_status)) ...[
+                            const SizedBox(height: 14),
+                            _navigationCard(),
+                          ],
                           const SizedBox(height: 14),
                           _mapCard(),
                           const SizedBox(height: 14),
@@ -250,6 +327,40 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Navigation and phone shortcuts are only offered once the order is
+  /// accepted — before that the captain has no recipient to contact.
+  Widget _navigationCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _line),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              key: const ValueKey('trip-navigate-button'),
+              onPressed: _openNavigation,
+              icon: const Icon(Icons.directions_outlined, size: 18),
+              label: const Text('التنقل بالخريطة'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              key: const ValueKey('trip-call-button'),
+              onPressed: _callRecipient,
+              icon: const Icon(Icons.phone_outlined, size: 18),
+              label: const Text('اتصال بالمستلم'),
+            ),
+          ),
         ],
       ),
     );

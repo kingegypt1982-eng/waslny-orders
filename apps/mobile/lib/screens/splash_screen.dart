@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
 
-class SplashScreen extends StatefulWidget {
+import '../core/api_client.dart';
+import '../core/post_login_route.dart';
+
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _fadeAnimation;
@@ -41,11 +45,19 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    Timer(const Duration(seconds: 6), () {
+    Timer(const Duration(seconds: 6), () async {
       if (!mounted) return;
 
-      /// الروت '/' يمر على HomeGate: إن كان هناك جلسة محفوظة يذهب
-      /// مباشرة للشاشة الرئيسية، وإلا يعرض شاشة اختيار الحساب (WelcomeScreen).
+      /// A saved session is restored through the same resolver used after
+      /// login: an active captain trip / client order comes back to the foreground,
+      /// a fresh captain still sees the documents wizard, and signed-out users
+      /// fall through to the welcome pages at '/'.
+      final session = ref.read(sessionProvider);
+      if (session != null) {
+        // The resolver always navigates (including when lookups fail).
+        await goToRelaunchRoute(context, ref, session);
+        return;
+      }
       context.go('/');
     });
   }

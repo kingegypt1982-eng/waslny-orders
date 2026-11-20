@@ -38,6 +38,15 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
   bool _canceling = false;
   final MapController _mapController = MapController();
 
+  /// Latest captain heartbeat (from GET /orders/:id/location). The server is
+  /// authoritative; a failed poll simply keeps the previous marker.
+  Map<String, double>? _captainPoint;
+  DateTime? _captainSeenAt;
+  Map<String, dynamic>? _rating;
+  bool _ratingBusy = false;
+  int _ratingScore = 5;
+  final TextEditingController _ratingComment = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -56,8 +65,81 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
           _error = null;
         });
       }
+      _loadLocation();
+      if (data['status'] == 'COMPLETED') _loadRating();
     } catch (error) {
       if (mounted) setState(() => _error = ApiClient.errorMessage(error));
+    }
+  }
+
+  /// Polls the captain's last server-side position while a trip is active.
+  Future<void> _loadLocation() async {
+    const liveStatuses = <String>{
+      'ACCEPTED',
+      'ARRIVED_AT_PICKUP',
+      'PICKED_UP',
+      'ON_THE_WAY',
+    };
+    final status = _order?['status']?.toString() ?? '';
+    if (!liveStatuses.contains(status)) {
+      if (mounted && _captainPoint != null) {
+        setState(() {
+          _captainPoint = null;
+          _captainSeenAt = null;
+        });
+      }
+      return;
+    }
+    try {
+      final data = await ref
+          .read(apiClientProvider)
+          .getMap('/orders/${widget.orderId}/location');
+      final lat = asDoubleOrNull(data['latitude']);
+      final lon = asDoubleOrNull(data['longitude']);
+      final seen = data['seenAt'] == null
+          ? null
+          : DateTime.tryParse(data['seenAt'].toString());
+      if (!mounted) return;
+      setState(() {
+        _captainPoint = lat != null && lon != null
+            ? {'lat': lat, 'lon': lon}
+            : null;
+        _captainSeenAt = seen;
+      });
+    } catch (_) {
+      // Tracking is best effort; the order refresh above still works.
+    }
+  }
+
+  Future<void> _loadRating() async {
+    try {
+      final data = await ref
+          .read(apiClientProvider)
+          .getMap('/orders/${widget.orderId}/rating');
+      if (!mounted) return;
+      setState(() {
+        _rating = data.isNotEmpty ? Map<String, dynamic>.from(data) : null;
+      });
+    } catch (_) {
+      // A rating is optional; never hide the order because it failed to load.
+    }
+  }
+
+  Future<void> _submitRating() async {
+    if (_ratingBusy || _rating != null) return;
+    setState(() => _ratingBusy = true);
+    try {
+      final comment = _ratingComment.text.trim();
+      await ref.read(apiClientProvider).post(
+            '/orders/${widget.orderId}/rating',
+            data: {'score': _ratingScore, if (comment.isNotEmpty) 'comment': comment},
+          );
+      await _loadRating();
+      if (mounted) _showTrackMessage(context, 'شكرًا لتقييمك الرحلة');
+    } catch (error) {
+      if (mounted) _showTrackMessage(context, ApiClient.errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _ratingBusy = false);
     }
   }
 
@@ -135,6 +217,7 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _ratingComment.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -171,6 +254,8 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                           child: _TMap(
                             order: order,
                             mapController: _mapController,
+                            captainPoint: _captainPoint,
+                            captainSeenAt: _captainSeenAt,
                           ),
                         ),
                         Expanded(
@@ -179,6 +264,13 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                             canceling: _canceling,
                             onConfirmDelivery: _confirmDelivery,
                             onCaptainTransition: _captainTransition,
+                            rating: _rating,
+                            ratingBusy: _ratingBusy,
+                            ratingScore: _ratingScore,
+                            ratingComment: _ratingComment,
+                            onRatingScoreChanged: (score) =>
+                                setState(() => _ratingScore = score),
+                            onSubmitRating: _submitRating,
                           ),
                         ),
                       ],
@@ -320,9 +412,16 @@ class _TLoadingState extends StatelessWidget {
 }
 
 class _TMap extends StatelessWidget {
-  const _TMap({required this.order, required this.mapController});
+  const _TMap({
+    required this.order,
+    required this.mapController,
+    required this.captainPoint,
+    required this.captainSeenAt,
+  });
   final Map<String, dynamic> order;
   final MapController mapController;
+  final Map<String, double>? captainPoint;
+  final DateTime? captainSeenAt;
 
   @override
   Widget build(BuildContext context) {
@@ -354,7 +453,11 @@ class _TMap extends StatelessWidget {
         ),
       );
     }
-    final bounds = LatLngBounds.fromPoints([pickup, delivery]);
+    final captain = captainPoint == null
+        ? null
+        : LatLng(captainPoint!['lat']!, captainPoint!['lon']!);
+    final points = [pickup, delivery, ?captain];
+    final bounds = LatLngBounds.fromPoints(points);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
       child: ClipRRect(
@@ -377,6 +480,18 @@ class _TMap extends StatelessWidget {
                 ),
                 MarkerLayer(
                   markers: [
+                    if (captain != null)
+                      Marker(
+                        key: const ValueKey('live-captain-marker'),
+                        point: captain,
+                        width: 40,
+                        height: 40,
+                        child: const Icon(
+                          Icons.two_wheeler_rounded,
+                          color: Color(0xFF4FA8FF),
+                          size: 32,
+                        ),
+                      ),
                     Marker(
                       point: pickup,
                       width: 36,
@@ -402,6 +517,25 @@ class _TMap extends StatelessWidget {
                 ),
               ],
             ),
+            if (captainSeenAt != null)
+              Positioned(
+                top: 10,
+                right: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _tCardLight.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'آخر تحديث للموقع ${_tTime(captainSeenAt!)}',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                ),
+              ),
             Positioned(
               left: 12,
               bottom: 12,
@@ -432,11 +566,23 @@ class _TBody extends ConsumerWidget {
     required this.canceling,
     required this.onConfirmDelivery,
     required this.onCaptainTransition,
+    required this.rating,
+    required this.ratingBusy,
+    required this.ratingScore,
+    required this.ratingComment,
+    required this.onRatingScoreChanged,
+    required this.onSubmitRating,
   });
   final Map<String, dynamic> order;
   final bool canceling;
   final VoidCallback onConfirmDelivery;
   final ValueChanged<String> onCaptainTransition;
+  final Map<String, dynamic>? rating;
+  final bool ratingBusy;
+  final int ratingScore;
+  final TextEditingController ratingComment;
+  final ValueChanged<int> onRatingScoreChanged;
+  final VoidCallback onSubmitRating;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -483,6 +629,17 @@ class _TBody extends ConsumerWidget {
             ),
           ),
         ],
+        if (status == 'COMPLETED' && isClient) ...[
+          const SizedBox(height: 12),
+          _TRatingCard(
+            rating: rating,
+            busy: ratingBusy,
+            score: ratingScore,
+            commentController: ratingComment,
+            onScoreChanged: onRatingScoreChanged,
+            onSubmit: onSubmitRating,
+          ),
+        ],
         if (role == 'CAPTAIN' && _captainNext.containsKey(status)) ...[
           const SizedBox(height: 14),
           SizedBox(
@@ -520,6 +677,132 @@ const _captainNext = {
   'PICKED_UP': ('ON_THE_WAY', 'بدء التوصيل'),
   'ON_THE_WAY': ('DELIVERED', 'تأكيد التسليم'),
 };
+
+class _TRatingCard extends StatelessWidget {
+  const _TRatingCard({
+    required this.rating,
+    required this.busy,
+    required this.score,
+    required this.commentController,
+    required this.onScoreChanged,
+    required this.onSubmit,
+  });
+
+  final Map<String, dynamic>? rating;
+  final bool busy;
+  final int score;
+  final TextEditingController commentController;
+  final ValueChanged<int> onScoreChanged;
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    final saved = rating != null;
+    final savedScore = saved ? rating!['score']?.toString() ?? '—' : '';
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: _tCard,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _tBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            saved ? 'تقييمك لهذه الرحلة' : 'قيّم رحلتك',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (saved) ...[
+            Row(
+              children: [
+                const Icon(Icons.star_rounded, color: _tGreen, size: 22),
+                const SizedBox(width: 6),
+                Text(
+                  '$savedScore من 5',
+                  style: const TextStyle(
+                    color: _tGreen,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+              ],
+            ),
+            if (rating!['comment'] != null &&
+                '${rating!['comment']}'.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${rating!['comment']}',
+                style: const TextStyle(color: _tMuted, fontSize: 12),
+              ),
+            ],
+          ] else ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var star = 1; star <= 5; star++)
+                  IconButton(
+                    key: ValueKey('rating-star-$star'),
+                    onPressed: busy ? null : () => onScoreChanged(star),
+                    icon: Icon(
+                      star <= score
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
+                      color: _tGreen,
+                      size: 30,
+                    ),
+                  ),
+              ],
+            ),
+            TextField(
+              key: const ValueKey('rating-comment-field'),
+              controller: commentController,
+              enabled: !busy,
+              maxLines: 2,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'تعليق اختياري',
+                hintStyle: TextStyle(color: _tMuted, fontSize: 12),
+                filled: true,
+                fillColor: _tCardLight,
+                border: OutlineInputBorder(borderSide: BorderSide.none),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                key: const ValueKey('submit-rating-button'),
+                onPressed: busy ? null : onSubmit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _tGreen,
+                  foregroundColor: _tBg,
+                ),
+                icon: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.star_rate_rounded),
+                label: const Text(
+                  'إرسال التقييم',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 class _TStatusCard extends StatelessWidget {
   const _TStatusCard({required this.order, required this.status});
@@ -983,6 +1266,12 @@ String _tDate(Object? value) {
   final local = dt.toLocal();
   String p(int n) => n.toString().padLeft(2, '0');
   return '${local.year}-${p(local.month)}-${p(local.day)} ${p(local.hour)}:${p(local.minute)}';
+}
+
+String _tTime(DateTime value) {
+  final local = value.toLocal();
+  String p(int n) => n.toString().padLeft(2, '0');
+  return '${p(local.hour)}:${p(local.minute)}';
 }
 
 void _showTrackMessage(BuildContext context, String text) =>
