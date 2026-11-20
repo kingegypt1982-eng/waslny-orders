@@ -17,7 +17,7 @@ jest.mock('fs/promises', () => ({
 describe('CaptainsController profile', () => {
   const prisma = {
     captainProfile: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
-    pricingSettings: { upsert: jest.fn() },
+    pricingSettings: { findUnique: jest.fn(), upsert: jest.fn() },
     wallet: { findUnique: jest.fn() },
   };
   const redis = { updateCaptainLocation: jest.fn() };
@@ -42,6 +42,11 @@ describe('CaptainsController profile', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.pricingSettings.findUnique.mockResolvedValue({
+      minRadiusKm: 2,
+      maxRadiusKm: 15,
+      minimumWalletBalance: 75,
+    });
     prisma.pricingSettings.upsert.mockResolvedValue({ minRadiusKm: 2, maxRadiusKm: 15 });
   });
 
@@ -53,12 +58,13 @@ describe('CaptainsController profile', () => {
 
   it('includes the configured minimum wallet balance in the wallet response', async () => {
     prisma.wallet.findUnique.mockResolvedValue({ balance: 40, user: { walletTransactions: [] } });
-    prisma.pricingSettings.upsert.mockResolvedValue({ minimumWalletBalance: 75 });
 
     await expect(controller.wallet({ id: 'u1' })).resolves.toMatchObject({
       balance: 40,
       minimumWalletBalance: 75,
     });
+    expect(prisma.pricingSettings.findUnique).toHaveBeenCalledWith({ where: { id: 'default' } });
+    expect(prisma.pricingSettings.upsert).not.toHaveBeenCalled();
   });
 
   it('rejects a duplicate national ID with 409 and does not reveal the other account', async () => {
@@ -140,6 +146,26 @@ describe('CaptainsController profile', () => {
     );
     expect(result.missing).not.toContain('nationalId');
     expect(result.radiusBand).toEqual({ min: 2, max: 15 });
+  });
+
+  it('uses safe defaults when the pricing settings row is absent', async () => {
+    prisma.pricingSettings.findUnique.mockResolvedValue(null);
+    prisma.captainProfile.findUnique.mockResolvedValue({
+      id: 'p1',
+      userId: 'u1',
+      status: 'ACTIVE',
+      user: { id: 'u1', phone: '01000000000', wallet: null },
+    });
+    prisma.wallet.findUnique.mockResolvedValue({ balance: 0, user: { walletTransactions: [] } });
+
+    const profileResult = (await controller.profile({ id: 'u1' })) as any;
+    expect(profileResult.radiusBand).toEqual({ min: 0.5, max: 15 });
+
+    await expect(controller.wallet({ id: 'u1' })).resolves.toMatchObject({
+      balance: 0,
+      minimumWalletBalance: 0,
+    });
+    expect(prisma.pricingSettings.upsert).not.toHaveBeenCalled();
   });
 
   it('accepts vehicle make/model/color and plate through the profile update', async () => {

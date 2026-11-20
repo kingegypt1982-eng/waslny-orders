@@ -59,7 +59,9 @@ export class CaptainsController {
     if (!profile.vehicleType || !profile.vehiclePlate) missing.push('vehicle');
     if (!profile.vehicleMake || !profile.vehicleColor) missing.push('vehicleDetails');
     if (!profile.profilePhotoDocument || profile.profilePhotoDocument === 'PENDING_UPLOAD') missing.push('profilePhoto');
-    const settings = await this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} });
+    // GET routes must not create the settings row as a side effect. Fall back
+    // to the schema defaults when the singleton row has never been created.
+    const settings = await this.prisma.pricingSettings.findUnique({ where: { id: 'default' } });
     const safe = { ...profile } as Record<string, unknown>;
     delete safe.nationalIdEncrypted;
     delete safe.nationalIdHash;
@@ -67,8 +69,8 @@ export class CaptainsController {
       ...safe,
       missing,
       radiusBand: {
-        min: Number(settings.minRadiusKm ?? DEFAULT_MIN_RADIUS_KM),
-        max: Number(settings.maxRadiusKm ?? DEFAULT_MAX_RADIUS_KM),
+        min: Number(settings?.minRadiusKm ?? DEFAULT_MIN_RADIUS_KM),
+        max: Number(settings?.maxRadiusKm ?? DEFAULT_MAX_RADIUS_KM),
       },
     };
   }
@@ -271,9 +273,9 @@ export class CaptainsController {
         where: { userId: user.id },
         include: { user: { select: { walletTransactions: { orderBy: { createdAt: 'desc' }, take: 50 } } } },
       }),
-      this.prisma.pricingSettings.upsert({ where: { id: 'default' }, update: {}, create: {} }),
+      this.prisma.pricingSettings.findUnique({ where: { id: 'default' } }),
     ]);
-    return { ...wallet, minimumWalletBalance: pricing.minimumWalletBalance };
+    return { ...wallet, minimumWalletBalance: pricing?.minimumWalletBalance ?? 0 };
   }
 }
 
