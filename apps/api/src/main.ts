@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/http-exception.filter';
 import { assertSecretsAreNotDefaults } from './security/secret-guard';
 
 function parseOrigins(value: string | undefined): string[] {
@@ -43,6 +44,7 @@ async function bootstrap() {
   }
   app.enableCors({ origin: origins.length ? origins : true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
+  app.useGlobalFilters(new AllExceptionsFilter());
   const swagger = new DocumentBuilder()
     .setTitle('Wasalny Orders API')
     .setDescription('Ready-shipment delivery platform API')
