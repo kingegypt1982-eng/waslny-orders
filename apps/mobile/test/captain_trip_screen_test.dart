@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -132,6 +134,80 @@ void main() {
     );
     expect(find.text('وصلت لموقع التسليم'), findsNothing);
     expect(find.text('اكتملت الرحلة'), findsNothing);
+  });
+
+  testWidgets('captain can rate from DELIVERED and after COMPLETED', (
+    tester,
+  ) async {
+    final api = _FakeTripApi(await _preferences(), _order('DELIVERED'));
+    await _pumpTrip(tester, api);
+
+    expect(find.text('قيّم رحلتك'), findsOneWidget);
+    expect(find.byKey(const ValueKey('submit-rating-button')), findsOneWidget);
+
+    api.order['status'] = 'COMPLETED';
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('قيّم رحلتك'), findsOneWidget);
+  });
+
+  testWidgets('captain rating button is disabled while the request is in flight', (
+    tester,
+  ) async {
+    final api = _FakeTripApi(await _preferences(), _order('DELIVERED'))
+      ..ratingCompleter = Completer<Map<String, dynamic>>();
+    await _pumpTrip(tester, api);
+
+    await tester.tap(find.byKey(const ValueKey('rating-star-4')));
+    await tester.enterText(
+      find.byKey(const ValueKey('rating-comment-field')),
+      'جيد',
+    );
+    await tester.tap(find.byKey(const ValueKey('submit-rating-button')));
+    await tester.pump();
+
+    expect(api.ratingPosts, hasLength(1));
+    expect(api.ratingPosts.single, {'stars': 4, 'comment': 'جيد'});
+    expect(
+      tester
+          .widget<ElevatedButton>(
+            find.byKey(const ValueKey('submit-rating-button')),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('submit-rating-button')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(api.ratingPosts, hasLength(1));
+
+    api.ratingCompleter!.complete({});
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('تقييمك لهذه الرحلة'), findsOneWidget);
+    expect(find.text('4 من 5'), findsOneWidget);
+  });
+
+  testWidgets('captain 409 hides the rating card without an error', (
+    tester,
+  ) async {
+    final api = _FakeTripApi(await _preferences(), _order('DELIVERED'))
+      ..ratingConflict = true;
+    await _pumpTrip(tester, api);
+
+    await tester.tap(find.byKey(const ValueKey('submit-rating-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byKey(const ValueKey('submit-rating-button')), findsNothing);
+    expect(find.text('قيّم رحلتك'), findsNothing);
+    expect(find.textContaining('تعذر'), findsNothing);
+    expect(find.text('تم تقييمك بالفعل'), findsOneWidget);
+    // The optional rating never blocks leaving the trip screen.
+    expect(find.byIcon(Icons.arrow_back), findsOneWidget);
   });
 
   testWidgets('completed trip shows the final summary and timeline', (
@@ -338,12 +414,23 @@ class _FakeTripApi extends ApiClient {
   List<dynamic> events = [];
   List<dynamic> proofs = [];
   bool failNextOnTheWayPatch = false;
+  Map<String, dynamic>? rating;
+  final ratingPosts = <Map<String, dynamic>>[];
+  Completer<Map<String, dynamic>>? ratingCompleter;
+  bool ratingConflict = false;
 
   @override
   Future<Map<String, dynamic>> getMap(
     String path, {
     Map<String, dynamic>? query,
-  }) async => Map<String, dynamic>.from(order);
+  }) async {
+    if (path.endsWith('/rating')) {
+      return rating == null
+          ? <String, dynamic>{}
+          : Map<String, dynamic>.from(rating!);
+    }
+    return Map<String, dynamic>.from(order);
+  }
 
   @override
   Future<List<dynamic>> getList(
@@ -366,7 +453,28 @@ class _FakeTripApi extends ApiClient {
   @override
   Future<Map<String, dynamic>> post(String path, {Object? data}) async {
     postPaths.add(path);
-    postData.add(data is Map ? Map<String, dynamic>.from(data) : {});
+    final body = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+    postData.add(body);
+    if (path.endsWith('/rating')) {
+      ratingPosts.add(body);
+      if (ratingConflict) {
+        final request = RequestOptions(path: path);
+        throw DioException(
+          requestOptions: request,
+          response: Response(
+            requestOptions: request,
+            statusCode: 409,
+            data: {'message': 'You have already rated this order'},
+          ),
+        );
+      }
+      if (ratingCompleter != null) return ratingCompleter!.future;
+      rating = {
+        'stars': body['stars'],
+        if (body['comment'] != null) 'comment': body['comment'],
+      };
+      return Map<String, dynamic>.from(rating!);
+    }
     return <String, dynamic>{};
   }
 

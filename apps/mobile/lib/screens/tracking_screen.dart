@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../core/api_client.dart';
 import '../core/json_utils.dart';
+import '../widgets/rating_input.dart';
 
 /// Dark premium RTL tracking screen for Waslny Orders.
 ///
@@ -44,7 +45,8 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
   DateTime? _captainSeenAt;
   Map<String, dynamic>? _rating;
   bool _ratingBusy = false;
-  int _ratingScore = 5;
+  bool _ratingHidden = false;
+  int _ratingStars = 5;
   final TextEditingController _ratingComment = TextEditingController();
 
   @override
@@ -66,7 +68,15 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
         });
       }
       _loadLocation();
-      if (data['status'] == 'COMPLETED') _loadRating();
+      // The API accepts a rating from DELIVERED onward, so offer it as soon as
+      // the captain marks delivery — not only after client confirmation.
+      final status = data['status']?.toString();
+      final role = ref.read(sessionProvider)?['role'];
+      if (role == 'CLIENT' &&
+          !_ratingHidden &&
+          (status == 'DELIVERED' || status == 'COMPLETED')) {
+        _loadRating();
+      }
     } catch (error) {
       if (mounted) setState(() => _error = ApiClient.errorMessage(error));
     }
@@ -132,12 +142,21 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
       final comment = _ratingComment.text.trim();
       await ref.read(apiClientProvider).post(
             '/orders/${widget.orderId}/rating',
-            data: {'score': _ratingScore, if (comment.isNotEmpty) 'comment': comment},
+            data: {
+              'stars': _ratingStars,
+              if (comment.isNotEmpty) 'comment': comment,
+            },
           );
       await _loadRating();
       if (mounted) _showTrackMessage(context, 'شكرًا لتقييمك الرحلة');
     } catch (error) {
-      if (mounted) _showTrackMessage(context, ApiClient.errorMessage(error));
+      if (!mounted) return;
+      if (ApiClient.isConflict(error)) {
+        // Already rated from another device/session: hide the form quietly.
+        setState(() => _ratingHidden = true);
+      } else {
+        _showTrackMessage(context, ApiClient.errorMessage(error));
+      }
     } finally {
       if (mounted) setState(() => _ratingBusy = false);
     }
@@ -268,10 +287,11 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                                 context.push('/captain/trip/${order['id']}'),
                             rating: _rating,
                             ratingBusy: _ratingBusy,
-                            ratingScore: _ratingScore,
+                            ratingHidden: _ratingHidden,
+                            ratingStars: _ratingStars,
                             ratingComment: _ratingComment,
-                            onRatingScoreChanged: (score) =>
-                                setState(() => _ratingScore = score),
+                            onRatingStarsChanged: (stars) =>
+                                setState(() => _ratingStars = stars),
                             onSubmitRating: _submitRating,
                           ),
                         ),
@@ -571,9 +591,10 @@ class _TBody extends ConsumerWidget {
     required this.onOpenCaptainTrip,
     required this.rating,
     required this.ratingBusy,
-    required this.ratingScore,
+    required this.ratingHidden,
+    required this.ratingStars,
     required this.ratingComment,
-    required this.onRatingScoreChanged,
+    required this.onRatingStarsChanged,
     required this.onSubmitRating,
   });
   final Map<String, dynamic> order;
@@ -583,9 +604,10 @@ class _TBody extends ConsumerWidget {
   final VoidCallback onOpenCaptainTrip;
   final Map<String, dynamic>? rating;
   final bool ratingBusy;
-  final int ratingScore;
+  final bool ratingHidden;
+  final int ratingStars;
   final TextEditingController ratingComment;
-  final ValueChanged<int> onRatingScoreChanged;
+  final ValueChanged<int> onRatingStarsChanged;
   final VoidCallback onSubmitRating;
 
   @override
@@ -637,14 +659,16 @@ class _TBody extends ConsumerWidget {
             ),
           ),
         ],
-        if (status == 'COMPLETED' && isClient) ...[
+        if ((status == 'DELIVERED' || status == 'COMPLETED') &&
+            isClient &&
+            !ratingHidden) ...[
           const SizedBox(height: 12),
           _TRatingCard(
             rating: rating,
             busy: ratingBusy,
-            score: ratingScore,
+            stars: ratingStars,
             commentController: ratingComment,
-            onScoreChanged: onRatingScoreChanged,
+            onStarsChanged: onRatingStarsChanged,
             onSubmit: onSubmitRating,
           ),
         ],
@@ -692,23 +716,25 @@ class _TRatingCard extends StatelessWidget {
   const _TRatingCard({
     required this.rating,
     required this.busy,
-    required this.score,
+    required this.stars,
     required this.commentController,
-    required this.onScoreChanged,
+    required this.onStarsChanged,
     required this.onSubmit,
   });
 
   final Map<String, dynamic>? rating;
   final bool busy;
-  final int score;
+  final int stars;
   final TextEditingController commentController;
-  final ValueChanged<int> onScoreChanged;
+  final ValueChanged<int> onStarsChanged;
   final VoidCallback onSubmit;
 
   @override
   Widget build(BuildContext context) {
     final saved = rating != null;
-    final savedScore = saved ? rating!['score']?.toString() ?? '—' : '';
+    final savedStars = saved
+        ? (rating!['stars'] ?? rating!['score'])?.toString() ?? '—'
+        : '';
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
@@ -734,7 +760,7 @@ class _TRatingCard extends StatelessWidget {
                 const Icon(Icons.star_rounded, color: _tGreen, size: 22),
                 const SizedBox(width: 6),
                 Text(
-                  '$savedScore من 5',
+                  '$savedStars من 5',
                   style: const TextStyle(
                     color: _tGreen,
                     fontWeight: FontWeight.w800,
@@ -751,63 +777,19 @@ class _TRatingCard extends StatelessWidget {
                 style: const TextStyle(color: _tMuted, fontSize: 12),
               ),
             ],
-          ] else ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (var star = 1; star <= 5; star++)
-                  IconButton(
-                    key: ValueKey('rating-star-$star'),
-                    onPressed: busy ? null : () => onScoreChanged(star),
-                    icon: Icon(
-                      star <= score
-                          ? Icons.star_rounded
-                          : Icons.star_border_rounded,
-                      color: _tGreen,
-                      size: 30,
-                    ),
-                  ),
-              ],
+          ] else
+            RatingInput(
+              stars: stars,
+              onStarsChanged: onStarsChanged,
+              commentController: commentController,
+              busy: busy,
+              onSubmit: onSubmit,
+              foregroundColor: Colors.white,
+              mutedColor: _tMuted,
+              accentColor: _tGreen,
+              fieldFillColor: _tCardLight,
+              buttonForegroundColor: _tBg,
             ),
-            TextField(
-              key: const ValueKey('rating-comment-field'),
-              controller: commentController,
-              enabled: !busy,
-              maxLines: 2,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: const InputDecoration(
-                hintText: 'تعليق اختياري',
-                hintStyle: TextStyle(color: _tMuted, fontSize: 12),
-                filled: true,
-                fillColor: _tCardLight,
-                border: OutlineInputBorder(borderSide: BorderSide.none),
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: ElevatedButton.icon(
-                key: const ValueKey('submit-rating-button'),
-                onPressed: busy ? null : onSubmit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _tGreen,
-                  foregroundColor: _tBg,
-                ),
-                icon: busy
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.star_rate_rounded),
-                label: const Text(
-                  'إرسال التقييم',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );

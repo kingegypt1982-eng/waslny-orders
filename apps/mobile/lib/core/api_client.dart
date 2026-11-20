@@ -138,6 +138,10 @@ class ApiClient {
     await preferences.remove('session_user');
   }
 
+  /// Duplicate ratings answer 409; screens treat that as "already rated".
+  static bool isConflict(Object error) =>
+      error is DioException && error.response?.statusCode == 409;
+
   static String errorMessage(Object error) {
     if (error is DioException) {
       final status = error.response?.statusCode;

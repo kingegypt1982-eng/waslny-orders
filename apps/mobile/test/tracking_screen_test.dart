@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -99,12 +100,95 @@ void main() {
 
     expect(api.postPaths, ['/orders/order-1/rating']);
     expect(api.ratingPosts.single, {
-      'score': 4,
+      'stars': 4,
       'comment': 'ممتاز',
     });
     expect(find.text('تقييمك لهذه الرحلة'), findsOneWidget);
     expect(find.text('4 من 5'), findsOneWidget);
     expect(find.byKey(const ValueKey('submit-rating-button')), findsNothing);
+  });
+
+  testWidgets('client can rate as soon as the order is delivered', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TrackingApiClient(await _preferences())
+      ..order['status'] = 'DELIVERED'
+      ..order['captainId'] = 'captain-1';
+    await _pumpTracking(tester, api);
+
+    expect(find.text('تأكيد الاستلام'), findsOneWidget);
+    expect(find.text('قيّم رحلتك'), findsOneWidget);
+    expect(find.byKey(const ValueKey('submit-rating-button')), findsOneWidget);
+  });
+
+  testWidgets('client rating button is disabled while the request is in flight', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TrackingApiClient(await _preferences())
+      ..order['status'] = 'COMPLETED'
+      ..order['captainId'] = 'captain-1'
+      ..ratingCompleter = Completer<Map<String, dynamic>>();
+    await _pumpTracking(tester, api);
+
+    await tester.tap(find.byKey(const ValueKey('rating-star-3')));
+    await tester.tap(find.byKey(const ValueKey('submit-rating-button')));
+    await tester.pump();
+
+    expect(api.ratingPosts, hasLength(1));
+    expect(
+      tester
+          .widget<ElevatedButton>(
+            find.byKey(const ValueKey('submit-rating-button')),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('submit-rating-button')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(api.ratingPosts, hasLength(1));
+
+    api.savedRating = {'stars': 3};
+    api.ratingCompleter!.complete({});
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('3 من 5'), findsOneWidget);
+  });
+
+  testWidgets('client 409 hides the rating card without an error', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TrackingApiClient(await _preferences())
+      ..order['status'] = 'COMPLETED'
+      ..order['captainId'] = 'captain-1'
+      ..ratingConflict = true;
+    await _pumpTracking(tester, api);
+
+    await tester.tap(find.byKey(const ValueKey('submit-rating-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byKey(const ValueKey('submit-rating-button')), findsNothing);
+    expect(find.text('قيّم رحلتك'), findsNothing);
+    expect(find.text('تقييمك لهذه الرحلة'), findsNothing);
+    expect(find.textContaining('تعذر'), findsNothing);
   });
 
   testWidgets('client confirms searching order cancellation once', (
@@ -220,6 +304,8 @@ class _TrackingApiClient extends ApiClient {
   Map<String, dynamic>? liveLocation;
   Map<String, dynamic>? savedRating;
   Completer<Map<String, dynamic>>? cancelCompleter;
+  Completer<Map<String, dynamic>>? ratingCompleter;
+  bool ratingConflict = false;
   final order = <String, dynamic>{
     'id': 'order-1',
     'reference': 'WS-1',
@@ -266,7 +352,24 @@ class _TrackingApiClient extends ApiClient {
     postPaths.add(path);
     if (path.endsWith('/rating')) {
       ratingPosts.add(data is Map ? Map<String, dynamic>.from(data) : {});
-      savedRating = {'score': ratingPosts.last['score'], 'comment': ratingPosts.last['comment']};
+      if (ratingConflict) {
+        final request = RequestOptions(path: path);
+        return Future.error(
+          DioException(
+            requestOptions: request,
+            response: Response(
+              requestOptions: request,
+              statusCode: 409,
+              data: {'message': 'You have already rated this order'},
+            ),
+          ),
+        );
+      }
+      if (ratingCompleter != null) return ratingCompleter!.future;
+      savedRating = {
+        'stars': ratingPosts.last['stars'],
+        'comment': ratingPosts.last['comment'],
+      };
       return Future.value(Map<String, dynamic>.from(savedRating!));
     }
     if (cancelCompleter != null) return cancelCompleter!.future;

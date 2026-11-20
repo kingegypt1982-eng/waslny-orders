@@ -13,6 +13,7 @@ import '../core/json_utils.dart';
 import '../core/location_service.dart';
 import '../core/texts.dart';
 import '../core/url_opener.dart';
+import '../widgets/rating_input.dart';
 
 const _green = Color(0xFF19785F);
 const _ink = Color(0xFF23362C);
@@ -86,6 +87,12 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   bool _busy = false;
   bool _showingPickupProof = false;
   bool _cancelledExitStarted = false;
+  Map<String, dynamic>? _rating;
+  bool _ratingBusy = false;
+  bool _ratingHidden = false;
+  bool _ratingRequested = false;
+  int _ratingStars = 5;
+  final TextEditingController _ratingComment = TextEditingController();
   String? _error;
   Map<String, dynamic> _order = const {};
   List<dynamic> _events = const [];
@@ -111,6 +118,7 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   void dispose() {
     _timer?.cancel();
     _heartbeatTimer?.cancel();
+    _ratingComment.dispose();
     super.dispose();
   }
 
@@ -137,6 +145,12 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
       if (_status == 'CANCELLED') {
         _leaveTrip('تم إلغاء الطلب من العميل، والعمولة مردودة');
         return;
+      }
+      if ((_status == 'DELIVERED' || _status == 'COMPLETED') &&
+          !_ratingRequested &&
+          !_ratingHidden) {
+        _ratingRequested = true;
+        _loadRating();
       }
       // Send one immediate fix when the trip is first shown (or refreshed);
       // the 20-second timer covers the rest of the journey.
@@ -270,6 +284,60 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   Future<void> _submitDeliveryProof() =>
       _run(() => _uploadProof('delivery', 'تم تأكيد تسليم الشحنة'));
 
+  Future<void> _loadRating() async {
+    try {
+      final data = await ref
+          .read(apiClientProvider)
+          .getMap('/orders/${widget.orderId}/rating');
+      if (!mounted) return;
+      setState(() {
+        _rating = data.isNotEmpty ? Map<String, dynamic>.from(data) : null;
+      });
+    } catch (_) {
+      // A rating is optional; retry on the next poll without blocking the trip.
+      if (mounted) setState(() => _ratingRequested = false);
+    }
+  }
+
+  Future<void> _submitRating() async {
+    if (_ratingBusy || _rating != null || _ratingHidden) return;
+    setState(() => _ratingBusy = true);
+    try {
+      final comment = _ratingComment.text.trim();
+      await ref.read(apiClientProvider).post(
+            '/orders/${widget.orderId}/rating',
+            data: {
+              'stars': _ratingStars,
+              if (comment.isNotEmpty) 'comment': comment,
+            },
+          );
+      if (mounted) {
+        setState(() {
+          _rating = {
+            'stars': _ratingStars,
+            if (comment.isNotEmpty) 'comment': comment,
+          };
+        });
+        _toast('شكرًا لتقييمك');
+      }
+    } catch (error) {
+      if (!mounted) return;
+      if (ApiClient.isConflict(error)) {
+        // Another device/session already rated: treat it as done and hide the
+        // optional card instead of showing an error.
+        setState(() {
+          _ratingHidden = true;
+          _rating = null;
+        });
+        _toast('تم تقييمك بالفعل');
+      } else {
+        _toast(ApiClient.errorMessage(error));
+      }
+    } finally {
+      if (mounted) setState(() => _ratingBusy = false);
+    }
+  }
+
   Future<void> _releaseOrder() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -342,10 +410,15 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
                           const SizedBox(height: 14),
                           _routeCard(),
                           const SizedBox(height: 14),
-                          if (_status == 'DELIVERED' || _status == 'COMPLETED')
+                          if (_status == 'DELIVERED' ||
+                              _status == 'COMPLETED') ...[
                             _summaryCard(),
-                          if (_status == 'DELIVERED' || _status == 'COMPLETED')
                             const SizedBox(height: 14),
+                            if (!_ratingHidden) ...[
+                              _ratingCard(),
+                              const SizedBox(height: 14),
+                            ],
+                          ],
                           _timelineCard(),
                         ],
                       ),
@@ -727,6 +800,44 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _ratingCard() {
+    final saved = _rating != null;
+    final savedStars = saved
+        ? (_rating!['stars'] ?? _rating!['score'])?.toString() ?? '—'
+        : '';
+    return _card(
+      title: saved ? 'تقييمك لهذه الرحلة' : 'قيّم رحلتك',
+      child: saved
+          ? Row(
+              children: [
+                const Icon(Icons.star_rounded, color: _green, size: 22),
+                const SizedBox(width: 6),
+                Text(
+                  '$savedStars من 5',
+                  style: const TextStyle(
+                    color: _green,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+              ],
+            )
+          : RatingInput(
+              stars: _ratingStars,
+              onStarsChanged: (stars) =>
+                  setState(() => _ratingStars = stars),
+              commentController: _ratingComment,
+              busy: _ratingBusy,
+              onSubmit: _submitRating,
+              foregroundColor: _ink,
+              mutedColor: _muted,
+              accentColor: _green,
+              fieldFillColor: const Color(0xFFF2F5F1),
+              buttonForegroundColor: Colors.white,
+            ),
     );
   }
 
