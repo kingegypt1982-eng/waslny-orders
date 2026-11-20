@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, StreamableFile, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Param, Patch, Post, StreamableFile, UseGuards } from '@nestjs/common';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -37,6 +37,8 @@ class AvailabilityDto {
 @Roles('CAPTAIN')
 @Controller('captains')
 export class CaptainsController {
+  private readonly logger = new Logger(CaptainsController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -227,7 +229,16 @@ export class CaptainsController {
       where: { userId: user.id },
       data: { lastLat: body.latitude, lastLng: body.longitude, lastSeenAt: new Date() },
     });
-    return { updated: await this.redis.updateCaptainLocation(user.id, body.latitude, body.longitude) };
+    try {
+      const updated = await this.redis.updateCaptainLocation(user.id, body.latitude, body.longitude);
+      return { updated };
+    } catch (error) {
+      // Redis only powers nearby-captain search. The PostgreSQL heartbeat is
+      // already saved, so a Redis outage must not turn this into a 500.
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Redis captain location update failed; PostgreSQL heartbeat saved: ${detail}`);
+      return { updated: false, reason: 'Location saved; live index unavailable' };
+    }
   }
 
   /**

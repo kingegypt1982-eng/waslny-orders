@@ -313,4 +313,21 @@ describe('CaptainsController profile', () => {
       data: expect.objectContaining({ lastLat: 30.1, lastLng: 31.2, lastSeenAt: expect.any(Date) }),
     }));
   });
+
+  it('keeps the location heartbeat when Redis is unavailable', async () => {
+    const warn = jest.spyOn((controller as any).logger, 'warn').mockImplementation(() => undefined);
+    prisma.captainProfile.findUnique.mockResolvedValue({ status: 'ACTIVE' });
+    prisma.captainProfile.update.mockResolvedValue({});
+    redis.updateCaptainLocation.mockRejectedValue(new Error('geoadd failed'));
+
+    await expect(
+      controller.location({ id: 'u1' }, { latitude: 30.1, longitude: 31.2 }),
+    ).resolves.toEqual({ updated: false, reason: 'Location saved; live index unavailable' });
+    expect(prisma.captainProfile.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'u1' },
+      data: expect.objectContaining({ lastLat: 30.1, lastLng: 31.2, lastSeenAt: expect.any(Date) }),
+    }));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Redis captain location update failed'));
+    warn.mockRestore();
+  });
 });
