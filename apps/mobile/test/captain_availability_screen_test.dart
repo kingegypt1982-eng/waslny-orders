@@ -188,6 +188,58 @@ void main() {
     expect(api.postPaths, isNot(contains('/orders/o1/skip')));
   });
 
+  testWidgets('ACK_REQUIRED shows the policy and retries the accept', (
+    tester,
+  ) async {
+    final api = _FakeApi(await _preferences())
+      ..orders = [_order(id: 'o1', distance: 0.6)]
+      ..ackRequiredAccept = true;
+    await _pumpAvailability(tester, api);
+
+    await tester.tap(find.text('قبول الطلب'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 30));
+
+    expect(find.text('أوافق على شروط استخدام المندوب'), findsOneWidget);
+    expect(find.text('أوافق وأكمل'), findsOneWidget);
+
+    await tester.tap(find.text('أوافق وأكمل'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(
+      api.postBodies.where(
+        (body) => body['path'] == '/acknowledgements',
+      ).single,
+      {
+        'path': '/acknowledgements',
+        'type': 'TERMS_CAPTAIN',
+        'policyVersion': '1.0.0',
+      },
+    );
+    expect(
+      api.postPaths.where((path) => path == '/orders/o1/accept'),
+      hasLength(2),
+    );
+    expect(find.text('TRIP o1'), findsOneWidget);
+  });
+
+  testWidgets('a 422 on accept shows a clear Arabic balance message', (
+    tester,
+  ) async {
+    final api = _FakeApi(await _preferences())
+      ..orders = [_order(id: 'o1', distance: 0.6)]
+      ..lowBalanceAccept = true;
+    await _pumpAvailability(tester, api);
+
+    await tester.tap(find.text('قبول الطلب'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 30));
+
+    expect(find.textContaining('رصيدك غير كافٍ'), findsOneWidget);
+    expect(find.text('TRIP o1'), findsNothing);
+  });
+
   testWidgets('an offer that runs out of time is hidden locally only', (
     tester,
   ) async {
@@ -435,6 +487,8 @@ class _FakeApi extends ApiClient {
   final patchBodies = <Map<String, dynamic>>[];
   int listCalls = 0;
   bool conflictAccept = false;
+  bool ackRequiredAccept = false;
+  bool lowBalanceAccept = false;
   Map<String, dynamic> profile = {
     'isOnline': true,
     'serviceRadiusKm': 10,
@@ -453,6 +507,10 @@ class _FakeApi extends ApiClient {
   }) async => switch (path) {
     '/captains/me' => Map<String, dynamic>.from(profile),
     '/captains/wallet' => Map<String, dynamic>.from(wallet),
+    '/policies/TERMS_CAPTAIN' => {
+      'title': 'شروط استخدام المندوب',
+      'text': 'أوافق على شروط استخدام المندوب',
+    },
     _ => <String, dynamic>{},
   };
 
@@ -480,6 +538,31 @@ class _FakeApi extends ApiClient {
           requestOptions: RequestOptions(path: path),
           statusCode: 409,
           data: {'message': 'Order was accepted by another captain'},
+        ),
+      );
+    }
+    if (ackRequiredAccept && path.endsWith('/accept')) {
+      ackRequiredAccept = false;
+      throw DioException(
+        requestOptions: RequestOptions(path: path),
+        response: Response(
+          requestOptions: RequestOptions(path: path),
+          statusCode: 403,
+          data: {
+            'code': 'ACK_REQUIRED',
+            'type': 'TERMS_CAPTAIN',
+            'policyVersion': '1.0.0',
+          },
+        ),
+      );
+    }
+    if (lowBalanceAccept && path.endsWith('/accept')) {
+      throw DioException(
+        requestOptions: RequestOptions(path: path),
+        response: Response(
+          requestOptions: RequestOptions(path: path),
+          statusCode: 422,
+          data: {'message': 'Insufficient wallet balance to accept this order'},
         ),
       );
     }

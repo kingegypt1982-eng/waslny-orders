@@ -12,6 +12,7 @@ import 'package:latlong2/latlong.dart';
 import '../core/api_client.dart';
 import '../core/json_utils.dart';
 import '../core/location_service.dart';
+import '../core/policy_acknowledgement.dart';
 import '../core/texts.dart';
 
 const _green = Color(0xFF19785F);
@@ -362,29 +363,55 @@ class _CaptainAvailabilityViewState
     if (_busy.contains(id)) return;
     setState(() => _busy.add(id));
     try {
+      var current = await _acceptOnce(id);
+      // The API may ask for more than one acknowledgement (terms, then a
+      // sensitive-category or invoice acknowledgement). Handle them in order.
+      while (current != null && PolicyAckNotice.from(current) != null) {
+        if (!mounted) return;
+        final agreed = await handlePolicyAcknowledgement(context, ref, current);
+        if (!agreed) return;
+        current = await _acceptOnce(id);
+      }
+      if (current != null && mounted) {
+        await _handleAcceptError(order, current);
+      }
+    } finally {
+      if (mounted) setState(() => _busy.remove(id));
+    }
+  }
+
+  /// Performs the accept call and returns the error, if any, so ACK_REQUIRED
+  /// can be handled by the caller without duplicating the success navigation.
+  Future<Object?> _acceptOnce(String id) async {
+    try {
       await ref.read(apiClientProvider).post('/orders/$id/accept');
-      if (!mounted) return;
+      if (!mounted) return null;
       _cardFeedback();
       _dismissed.add(id);
       _removeCard(id);
       _toast('تم قبول الطلب، بالتوفيق!');
       context.push('/captain/trip/$id');
+      return null;
     } catch (error) {
-      if (!mounted) return;
-      if (_isOrderTaken(error)) {
-        // Someone else won the race: drop the card locally and re-sync.
-        _dismiss(
-          order,
-          notifyServer: false,
-          toast: 'عذرًا، لم يعد هذا الطلب متاحًا — تم قبوله من مندوب آخر.',
-        );
-      } else {
-        _toast(ApiClient.errorMessage(error));
-      }
-      await _refresh(silent: true);
-    } finally {
-      if (mounted) setState(() => _busy.remove(id));
+      return error;
     }
+  }
+
+  Future<void> _handleAcceptError(
+    Map<String, dynamic> order,
+    Object error,
+  ) async {
+    if (_isOrderTaken(error)) {
+      // Someone else won the race: drop the card locally and re-sync.
+      await _dismiss(
+        order,
+        notifyServer: false,
+        toast: 'عذرًا، لم يعد هذا الطلب متاحًا — تم قبوله من مندوب آخر.',
+      );
+    } else {
+      _toast(ApiClient.errorMessage(error));
+    }
+    await _refresh(silent: true);
   }
 
   /// True when the server refused the accept because the order is gone

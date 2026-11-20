@@ -140,13 +140,44 @@ class ApiClient {
 
   static String errorMessage(Object error) {
     if (error is DioException) {
-      final message = error.response?.data is Map
-          ? (error.response?.data as Map)['message']
-          : null;
+      final status = error.response?.statusCode;
+      final body = error.response?.data;
+      final message = body is Map ? body['message'] : null;
+      final text = message is List
+          ? message.join('\n')
+          : message is String
+              ? message
+              : '';
+      final lower = text.toLowerCase();
+
+      if (status == 409) {
+        if (lower.contains('no longer available') ||
+            lower.contains('accepted by another') ||
+            lower.contains('another captain')) {
+          return 'عذرًا، لم يعد هذا الطلب متاحًا.';
+        }
+        return 'تعذر إتمام الطلب بسبب تعارض في الحالة. حاول مجددًا.';
+      }
+      if (status == 422) {
+        if (lower.contains('insufficient wallet balance')) {
+          return 'رصيدك غير كافٍ لقبول الطلب. يرجى شحن الرصيد أولًا.';
+        }
+        if (lower.contains('proof')) {
+          return 'يلزم إرفاق صورة لإتمام هذه الخطوة.';
+        }
+        return 'تعذر إتمام الطلب. تحقق من البيانات وحاول مجددًا.';
+      }
+      if (status == 403 && body is Map && body['code'] == 'ACK_REQUIRED') {
+        return 'يلزم الموافقة على الإقرار قبل إتمام الطلب.';
+      }
+      if (status == 403 && lower.contains('not approved')) {
+        return 'لم تتم الموافقة على حسابك كمندوب بعد.';
+      }
       if (message is List) return message.join('\n');
       if (message is String) return message;
-      if (error.type == DioExceptionType.connectionError)
+      if (error.type == DioExceptionType.connectionError) {
         return 'Cannot reach the Wasalny API. Check your connection and server.';
+      }
     }
     return 'Something went wrong. Please try again.';
   }
