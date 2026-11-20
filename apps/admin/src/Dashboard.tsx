@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, ArrowRight, ArrowUpRight, Bell, Bike, Boxes, Check, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react'
 import './dashboard.css'
 import { applicationReviewLabel, isDocUploaded } from './labels'
+import TopUpsPage from './TopUpsPage'
 
 type Order = { id: string; reference: string; status: string; pickupLabel: string; deliveryLabel: string; price: number; createdAt: string; client?: { name: string }; captain?: { id?: string; name: string } | null }
 type Captain = {
@@ -27,6 +28,7 @@ const navigation: { label: string; to: string; icon: typeof Users; stat?: 'openO
   { label: 'Captains', to: '/captains', icon: Bike, stat: 'pendingCaptains' },
   { label: 'Clients', to: '/clients', icon: Users },
   { label: 'Wallets', to: '/wallets', icon: WalletCards },
+  { label: 'Top-ups', to: '/topups', icon: CircleDollarSign },
   { label: 'Reports', to: '/reports', icon: Activity },
 ]
 
@@ -344,5 +346,5 @@ function AuthPage() {
 }
 
 export default function Dashboard() {
-  return <Routes><Route path="/login" element={<AuthPage />} /><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="captains/:userId" element={<CaptainReviewPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<Navigate to="/login" replace />} /></Route></Routes>
+  return <Routes><Route path="/login" element={<AuthPage />} /><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="captains/:userId" element={<CaptainReviewPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="topups" element={<TopUpsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<Navigate to="/login" replace />} /></Route></Routes>
 }

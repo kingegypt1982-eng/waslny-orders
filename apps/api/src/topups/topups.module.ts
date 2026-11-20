@@ -4,9 +4,10 @@ import { TopUpsController } from './topups.controller';
 import { TopUpsService } from './topups.service';
 import { TopupsScheduler } from './topups.scheduler';
 import { WebhooksController } from './webhooks.controller';
+import { PaymentReturnController } from './payment-return.controller';
 
 @Module({
-  controllers: [TopUpsController, WebhooksController],
+  controllers: [TopUpsController, WebhooksController, PaymentReturnController],
   providers: [TopUpsService, TopupsScheduler, { provide: KashierClient, useFactory: () => KashierClient.fromEnv() }],
   exports: [TopUpsService],
 })

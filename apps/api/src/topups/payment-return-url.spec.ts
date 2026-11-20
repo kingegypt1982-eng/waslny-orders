@@ -1,5 +1,5 @@
 import {
-  PAYMENT_REDIRECT_PATH,
+  PAYMENT_RETURN_PATH,
   parseHttpOrigin,
   parseOriginList,
   resolvePaymentReturnUrl,
@@ -12,9 +12,10 @@ describe('parseHttpOrigin', () => {
     expect(parseHttpOrigin('  https://app.example.com  ')).toBe('https://app.example.com');
   });
 
-  it('rejects non-http schemes and garbage', () => {
+  it('rejects non-http schemes, credentials and garbage', () => {
     expect(parseHttpOrigin('myapp://wallet/topup-result')).toBeNull();
     expect(parseHttpOrigin('javascript:alert(1)')).toBeNull();
+    expect(parseHttpOrigin('https://user:pass@example.test')).toBeNull();
     expect(parseHttpOrigin('not a url')).toBeNull();
     expect(parseHttpOrigin('')).toBeNull();
     expect(parseHttpOrigin(undefined)).toBeNull();
@@ -35,19 +36,47 @@ describe('parseOriginList', () => {
 });
 
 describe('resolvePaymentReturnUrl', () => {
-  beforeEach(() => {
-    delete process.env.CORS_ORIGINS;
-    delete process.env.CLIENT_ORIGIN;
+  const ENV_KEYS = ['CORS_ORIGINS', 'CLIENT_ORIGIN', 'KASHIER_REDIRECT_URL'] as const;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   });
 
-  it('uses the request origin when it is allow-listed', () => {
+  afterAll(() => {
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+  });
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) delete process.env[key];
+  });
+
+  it('uses a configured URL verbatim, including its path and query', () => {
     expect(
       resolvePaymentReturnUrl({
         origin: 'http://localhost:5173',
         allowList: 'http://localhost:5173',
-        clientOrigin: 'https://other.test',
+        configuredRedirectUrl: 'https://tunnel.test/api/v1/payment-return?source=kashier#top',
       }),
-    ).toBe(`http://localhost:5173${PAYMENT_REDIRECT_PATH}`);
+    ).toBe('https://tunnel.test/api/v1/payment-return?source=kashier#top');
+  });
+
+  it('falls back to KASHIER_REDIRECT_URL from the environment', () => {
+    process.env.KASHIER_REDIRECT_URL = 'https://tunnel.test/api/v1/payment-return';
+    expect(resolvePaymentReturnUrl({})).toBe('https://tunnel.test/api/v1/payment-return');
+  });
+
+  it('ignores an invalid configured URL and uses the allow-listed request origin', () => {
+    expect(
+      resolvePaymentReturnUrl({
+        origin: 'http://localhost:5173',
+        allowList: 'http://localhost:5173',
+        configuredRedirectUrl: 'myapp://wallet/topup-result',
+      }),
+    ).toBe(`http://localhost:5173${PAYMENT_RETURN_PATH}`);
   });
 
   it('never carries a path or query from the request origin', () => {
@@ -55,7 +84,7 @@ describe('resolvePaymentReturnUrl', () => {
       origin: 'http://localhost:5173/evil?next=//attacker',
       allowList: 'http://localhost:5173',
     });
-    expect(url).toBe(`http://localhost:5173${PAYMENT_REDIRECT_PATH}`);
+    expect(url).toBe(`http://localhost:5173${PAYMENT_RETURN_PATH}`);
     expect(url).not.toContain('evil');
   });
 
@@ -66,19 +95,10 @@ describe('resolvePaymentReturnUrl', () => {
         allowList: 'http://localhost:5173',
         clientOrigin: 'http://localhost:5174',
       }),
-    ).toBe(`http://localhost:5174${PAYMENT_REDIRECT_PATH}`);
+    ).toBe(`http://localhost:5174${PAYMENT_RETURN_PATH}`);
     expect(
       resolvePaymentReturnUrl({ allowList: 'http://localhost:5173', clientOrigin: 'http://localhost:5174' }),
-    ).toBe(`http://localhost:5174${PAYMENT_REDIRECT_PATH}`);
-  });
-
-  it('falls back to the configured redirect origin last', () => {
-    expect(
-      resolvePaymentReturnUrl({
-        allowList: '',
-        configuredRedirectUrl: 'https://tunnel.test/payment-redirect',
-      }),
-    ).toBe(`https://tunnel.test${PAYMENT_REDIRECT_PATH}`);
+    ).toBe(`http://localhost:5174${PAYMENT_RETURN_PATH}`);
   });
 
   it('returns null when no http(s) candidate exists', () => {
@@ -91,6 +111,6 @@ describe('resolvePaymentReturnUrl', () => {
   it('treats the configured app origin as allow-listed implicitly', () => {
     expect(
       resolvePaymentReturnUrl({ origin: 'http://localhost:5174', clientOrigin: 'http://localhost:5174', allowList: '' }),
-    ).toBe(`http://localhost:5174${PAYMENT_REDIRECT_PATH}`);
+    ).toBe(`http://localhost:5174${PAYMENT_RETURN_PATH}`);
   });
 });

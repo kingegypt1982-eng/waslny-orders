@@ -241,7 +241,8 @@ export class TopUpsService {
     const data = body?.data as Record<string, unknown> | undefined;
     if (!data || typeof data !== 'object' || !this.kashier.verifyWebhook(data, headerSignature)) {
       this.logger.warn('kashier webhook invalid-signature');
-      throw new UnauthorizedException('Invalid webhook signature');
+      // Generic HTTP 401: no explanation of which check failed reaches the caller.
+      throw new UnauthorizedException();
     }
     const ref = typeof data.merchantOrderId === 'string' ? data.merchantOrderId : null;
     if (!ref) {

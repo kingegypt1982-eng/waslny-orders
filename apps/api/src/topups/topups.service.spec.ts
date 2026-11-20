@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildSignaturePayload } from './kashier-signature';
 import { KashierClient } from './kashier.client';
+import { PAYMENT_RETURN_PATH } from './payment-return-url';
 import { TopUpsService } from './topups.service';
 
 const TEST_API_KEY = 'test-payment-api-key';
@@ -112,7 +113,7 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
       currency: 'EGP',
       orderRef: expect.stringMatching(/^topup_[0-9a-f]{32}$/),
       description: expect.stringContaining('topup_'),
-      redirectUrl: 'https://app.test/#/payment-redirect',
+      redirectUrl: 'https://app.test/payment-redirect',
       customer: { email: 'cap@test.com', reference: 'cap1' },
     });
     expect(prisma.topUp.create).toHaveBeenCalledWith({
@@ -127,26 +128,40 @@ describe('TopUpsService (Kashier sandbox, all network mocked)', () => {
     expect(stored.feeAmount.toFixed(2)).toBe('5.13');
   });
 
-  it('sends the payer back to the allow-listed request origin', async () => {
+  it('prefers the configured .env return URL verbatim over the request origin', async () => {
     stubPendingTopUp();
+    process.env.CORS_ORIGINS = 'http://localhost:5173';
+    kashier.redirectUrl = 'https://tunnel.test/api/v1/payment-return';
+
+    await service.createTopUp('cap1', 200, 'http://localhost:5173');
+
+    expect(kashier.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ redirectUrl: 'https://tunnel.test/api/v1/payment-return' }),
+    );
+  });
+
+  it('sends the payer to the API return page on the allow-listed request origin', async () => {
+    stubPendingTopUp();
+    kashier.redirectUrl = '';
     process.env.CORS_ORIGINS = 'http://localhost:5173,http://localhost:5174';
 
     await service.createTopUp('cap1', 200, 'http://localhost:5173');
 
     expect(kashier.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ redirectUrl: 'http://localhost:5173/#/payment-redirect' }),
+      expect.objectContaining({ redirectUrl: `http://localhost:5173${PAYMENT_RETURN_PATH}` }),
     );
   });
 
   it('ignores an Origin outside the allow-list and uses CLIENT_ORIGIN', async () => {
     stubPendingTopUp();
+    kashier.redirectUrl = '';
     process.env.CORS_ORIGINS = 'http://localhost:5173';
     process.env.CLIENT_ORIGIN = 'http://localhost:5173';
 
     await service.createTopUp('cap1', 200, 'https://evil.example/phish?next=1');
 
     expect(kashier.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ redirectUrl: 'http://localhost:5173/#/payment-redirect' }),
+      expect.objectContaining({ redirectUrl: `http://localhost:5173${PAYMENT_RETURN_PATH}` }),
     );
   });
 
