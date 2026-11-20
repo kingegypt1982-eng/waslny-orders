@@ -44,6 +44,20 @@ void main() {
     );
   });
 
+  test('relaunch resolver keeps a delivered captain trip on the trip screen', () async {
+    final api = _RestoreApi(
+      await _preferences(),
+      profile: {'status': 'ACTIVE'},
+      orders: [
+        {'id': 'done-5', 'status': 'DELIVERED'},
+      ],
+    );
+    expect(
+      await resolveRelaunchRoute(api, {'role': 'CAPTAIN'}),
+      '/captain/trip/done-5',
+    );
+  });
+
   test('maps and phone helpers build external URLs without a platform call', () {
     final maps = mapsDirectionsUri(
       destinationLatitude: 30.1,

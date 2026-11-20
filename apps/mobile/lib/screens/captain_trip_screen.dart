@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -18,6 +19,27 @@ const _ink = Color(0xFF23362C);
 const _muted = Color(0xFF829087);
 const _line = Color(0xFFE8ECE7);
 const _dark = Color(0xFF22342B);
+
+class TripProofPhoto {
+  const TripProofPhoto(this.bytes, this.name);
+  final Uint8List bytes;
+  final String name;
+}
+
+typedef TripProofPicker = Future<TripProofPhoto?> Function();
+
+/// Injectable so widget tests can exercise the proof flow without a camera.
+final tripProofPickerProvider = Provider<TripProofPicker>((ref) {
+  return () async {
+    final image = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+    if (image == null) return null;
+    return TripProofPhoto(await image.readAsBytes(), image.name);
+  };
+});
 
 /// Screens 14 & 15 — the captain trip.
 ///
@@ -62,6 +84,8 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   bool _sendingHeartbeat = false;
   bool _loading = true;
   bool _busy = false;
+  bool _showingPickupProof = false;
+  bool _cancelledExitStarted = false;
   String? _error;
   Map<String, dynamic> _order = const {};
   List<dynamic> _events = const [];
@@ -108,7 +132,12 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
         _order = results[0] as Map<String, dynamic>;
         _events = results[1] as List<dynamic>;
         _proofs = results[2] as List<dynamic>;
+        if (_status != 'ARRIVED_AT_PICKUP') _showingPickupProof = false;
       });
+      if (_status == 'CANCELLED') {
+        _leaveTrip('تم إلغاء الطلب من العميل، والعمولة مردودة');
+        return;
+      }
       // Send one immediate fix when the trip is first shown (or refreshed);
       // the 20-second timer covers the rest of the journey.
       if (!silent) _sendHeartbeat();
@@ -166,9 +195,14 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
     await ref.read(urlOpenerProvider)(telephoneUri(phone));
   }
 
-  /// Pickup while heading to collection, delivery once the parcel is picked up.
+  /// Pickup until the parcel is handed over, delivery once it is picked up.
   LatLng? _navigationTarget() {
-    final toPickup = _status == 'ACCEPTED' || _status == 'ARRIVED_AT_PICKUP';
+    const pickupStages = <String>{
+      'ACCEPTED',
+      'ARRIVED_AT_PICKUP',
+      'PICKED_UP',
+    };
+    final toPickup = _showingPickupProof || pickupStages.contains(_status);
     return _point(
       _order[toPickup ? 'pickupLatitude' : 'deliveryLatitude'],
       _order[toPickup ? 'pickupLongitude' : 'deliveryLongitude'],
@@ -194,23 +228,76 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
         if (mounted) _toast('تم تحديث حالة الطلب');
       });
 
-  Future<void> _submitProof(String type, String label) => _run(() async {
-        final picker = ImagePicker();
-        final image = await picker.pickImage(
-          source: ImageSource.camera,
-          maxWidth: 1600,
-          imageQuality: 85,
+  /// The single retryable start-delivery request. Used by the PICKED_UP button,
+  /// by the automatic step after pickup proof, and after a failed auto-attempt.
+  Future<void> _startDeliveryRequest() async {
+    await ref
+        .read(apiClientProvider)
+        .patch('/orders/${widget.orderId}/status', data: {'status': 'ON_THE_WAY'});
+    if (mounted) _toast('تم بدء التوصيل');
+  }
+
+  Future<void> _startDelivery() => _run(_startDeliveryRequest);
+
+  Future<void> _uploadProof(String type, String label) async {
+    final photo = await ref.read(tripProofPickerProvider)();
+    if (photo == null) return;
+    await ref.read(apiClientProvider).uploadFile(
+          '/orders/${widget.orderId}/proof/$type',
+          photo.bytes,
+          photo.name,
+          field: 'photo',
         );
-        if (image == null) return;
-        final bytes = await image.readAsBytes();
-        await ref.read(apiClientProvider).uploadFile(
-              '/orders/${widget.orderId}/proof/$type',
-              bytes,
-              image.name,
-              field: 'photo',
-            );
-        if (mounted) _toast(label);
+    if (mounted) _toast(label);
+  }
+
+  Future<void> _submitPickupProof() => _run(() async {
+        await _uploadProof('pickup', 'تم تأكيد استلام الشحنة');
+        if (mounted) {
+          setState(() => _showingPickupProof = false);
+        }
+        try {
+          await _startDeliveryRequest();
+        } catch (_) {
+          // The server has already moved to PICKED_UP. Keep the same button
+          // visible so the captain can retry without losing the proof.
+          if (mounted) {
+            _toast('تعذر بدء التوصيل تلقائيًا، اضغط «ابدأ التوصيل».');
+          }
+        }
       });
+
+  Future<void> _submitDeliveryProof() =>
+      _run(() => _uploadProof('delivery', 'تم تأكيد تسليم الشحنة'));
+
+  Future<void> _releaseOrder() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(apiClientProvider).post('/orders/${widget.orderId}/release');
+      if (mounted) _leaveTrip('تم إرجاع الطلب إلى قائمة الطلبات');
+    } catch (error) {
+      if (mounted) _toast(ApiClient.errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Leaves a trip that can no longer be worked. Timers stop immediately so a
+  /// cancelled order never keeps polling from a disposed screen.
+  void _leaveTrip(String message) {
+    if (_cancelledExitStarted) return;
+    _cancelledExitStarted = true;
+    _timer?.cancel();
+    _heartbeatTimer?.cancel();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(SnackBar(content: Text(message)));
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/');
+    }
+  }
 
   void _toast(String message) {
     ScaffoldMessenger.of(context)
@@ -245,8 +332,8 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
                     : ListView(
                         padding: const EdgeInsets.fromLTRB(18, 14, 18, 26),
                         children: [
-                          _statusCard(),
-                          if (_activeTripStatuses.contains(_status)) ...[
+                          _stepCard(),
+                          if (_status == 'ACCEPTED' || _status == 'ON_THE_WAY') ...[
                             const SizedBox(height: 14),
                             _navigationCard(),
                           ],
@@ -268,8 +355,12 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
     );
   }
 
-  Widget _statusCard() {
+  /// One card, five sequential stages. The stage comes from the server status,
+  /// except the local pickup-proof stage entered from ARRIVED_AT_PICKUP.
+  Widget _stepCard() {
     final cancelled = _status == 'CANCELLED';
+    final action = _actionLabel();
+    final foreground = cancelled ? const Color(0xFFA03040) : Colors.white;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -283,53 +374,122 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
             children: [
               Icon(
                 cancelled ? Icons.cancel_outlined : Icons.local_shipping_outlined,
-                color: cancelled ? const Color(0xFFA03040) : Colors.white,
+                color: foreground,
                 size: 20,
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  _statusLabels[_status] ?? _status,
-                  style: TextStyle(
-                    color: cancelled ? const Color(0xFFA03040) : Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _stepTitle(),
+                      style: TextStyle(
+                        color: foreground,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if ((_statusLabels[_status] ?? _status) != _stepTitle())
+                      Text(
+                        _statusLabels[_status] ?? _status,
+                        style: const TextStyle(
+                          color: Color(0xFFC9D6CE),
+                          fontSize: 12.5,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
           ),
-          if (_status == 'DELIVERED') ...[
+          const SizedBox(height: 12),
+          if (_showingPickupProof) ...[
+            _stageAddress(pickup: true),
             const SizedBox(height: 8),
+            const Text(
+              'ارفع صورة واضحة للشحنة قبل بدء التوصيل.',
+              style: TextStyle(color: Color(0xFFC9D6CE), fontSize: 12.5),
+            ),
+          ] else if (_status == 'ACCEPTED' ||
+              _status == 'ARRIVED_AT_PICKUP' ||
+              _status == 'PICKED_UP') ...[
+            _stageAddress(pickup: true),
+          ] else if (_status == 'ON_THE_WAY') ...[
+            _stageAddress(pickup: false),
+          ],
+          if (_status == 'DELIVERED') ...[
             const Text(
               'في انتظار تأكيد العميل لاستلام الشحنة لإكمال الطلب وتحويل الأرباح.',
               style: TextStyle(color: Color(0xFFC9D6CE), fontSize: 12.5),
             ),
           ],
-          if (_actionLabel() != null) ...[
+          if (action != null) ...[
             const SizedBox(height: 14),
+            _primaryAction(action, _busy ? null : _performAction),
+          ],
+          if (_status == 'ACCEPTED') ...[
+            const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: _green),
-                onPressed: _busy ? null : _performAction,
-                icon: _busy
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.arrow_forward, size: 18),
-                label: Text(_actionLabel()!),
+              child: OutlinedButton.icon(
+                key: const ValueKey('trip-release-button'),
+                onPressed: _busy ? null : _releaseOrder,
+                icon: const Icon(Icons.cancel_outlined, size: 18),
+                label: const Text(
+                  'اعتذار',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
               ),
             ),
           ],
         ],
       ),
     );
+  }
+
+  Widget _stageAddress({required bool pickup}) => _lineRow(
+        pickup ? Icons.trip_origin : Icons.place_outlined,
+        pickup ? _green : const Color(0xFFD9534F),
+        pickup ? 'الاستلام' : 'التسليم',
+        (pickup ? _order['pickupLabel'] : _order['deliveryLabel'])?.toString() ??
+            '',
+      );
+
+  Widget _primaryAction(String label, VoidCallback? onPressed) => SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          key: const ValueKey('trip-primary-action'),
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(backgroundColor: _green),
+          icon: const Icon(Icons.arrow_forward, size: 18),
+          label: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+          ),
+        ),
+      );
+
+  String _stepTitle() {
+    if (_showingPickupProof) return 'استلام الأوردر';
+    switch (_status) {
+      case 'ACCEPTED':
+        return 'التوجه للعميل';
+      case 'ARRIVED_AT_PICKUP':
+        return 'الوصول';
+      case 'PICKED_UP':
+        return 'تم استلام الأوردر';
+      case 'ON_THE_WAY':
+        return 'التوجه لموقع التسليم';
+      case 'DELIVERED':
+        return 'تم التسليم';
+      case 'COMPLETED':
+        return 'اكتملت الرحلة';
+      case 'CANCELLED':
+        return 'تم إلغاء الطلب';
+      default:
+        return _statusLabels[_status] ?? _status;
+    }
   }
 
   /// Navigation and phone shortcuts are only offered once the order is
@@ -367,33 +527,38 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
   }
 
   String? _actionLabel() {
+    if (_showingPickupProof) return 'تصوير ورفع صورة الاستلام';
     switch (_status) {
       case 'ACCEPTED':
-        return 'وصلت لموقع الاستلام';
+        return 'وصلت';
       case 'ARRIVED_AT_PICKUP':
-        return 'تصوير الشحنة وتأكيد الاستلام';
+        return 'استلمت الأوردر';
       case 'PICKED_UP':
-        return 'بدء التوصيل للعميل';
+        return 'ابدأ التوصيل';
       case 'ON_THE_WAY':
-        return 'تصوير التسليم وتأكيده';
+        return 'وصلت لموقع التسليم';
       default:
         return null;
     }
   }
 
   void _performAction() {
+    if (_showingPickupProof) {
+      _submitPickupProof();
+      return;
+    }
     switch (_status) {
       case 'ACCEPTED':
         _transition('ARRIVED_AT_PICKUP');
         return;
       case 'ARRIVED_AT_PICKUP':
-        _submitProof('pickup', 'تم تأكيد استلام الشحنة');
+        if (mounted) setState(() => _showingPickupProof = true);
         return;
       case 'PICKED_UP':
-        _transition('ON_THE_WAY');
+        _startDelivery();
         return;
       case 'ON_THE_WAY':
-        _submitProof('delivery', 'تم تأكيد تسليم الشحنة');
+        _submitDeliveryProof();
         return;
     }
   }

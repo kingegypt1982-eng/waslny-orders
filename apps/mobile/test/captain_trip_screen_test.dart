@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/api_client.dart';
@@ -11,42 +13,103 @@ import 'package:wasalny_orders/core/url_opener.dart';
 import 'package:wasalny_orders/screens/captain_trip_screen.dart';
 
 void main() {
-  testWidgets('accepted trip advances to the pickup point', (tester) async {
+  testWidgets('accepted trip is the heading-to-customer stage', (tester) async {
     final api = _FakeTripApi(await _preferences(), _order('ACCEPTED'));
     await _pumpTrip(tester, api);
 
+    expect(find.text('التوجه للعميل'), findsOneWidget);
     expect(find.text('تم قبول الطلب'), findsOneWidget);
-    await tester.tap(find.text('وصلت لموقع الاستلام'));
+    expect(find.byKey(const ValueKey('trip-release-button')), findsOneWidget);
+
+    await tester.tap(find.text('وصلت'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 30));
 
     expect(api.patchCalls.single['path'], '/orders/o1/status');
     expect(api.patchCalls.single['status'], 'ARRIVED_AT_PICKUP');
-    expect(find.text('تصوير الشحنة وتأكيد الاستلام'), findsOneWidget);
+    expect(find.text('استلمت الأوردر'), findsOneWidget);
+    expect(find.byKey(const ValueKey('trip-release-button')), findsNothing);
   });
 
-  testWidgets('picked-up trip starts the delivery leg', (tester) async {
+  testWidgets('pickup proof uploads the photo and starts delivery automatically', (
+    tester,
+  ) async {
+    final api = _FakeTripApi(await _preferences(), _order('ARRIVED_AT_PICKUP'));
+    await _pumpTrip(tester, api, proof: _fakeProof());
+
+    await tester.tap(find.text('استلمت الأوردر'));
+    await tester.pump();
+    expect(find.text('استلام الأوردر'), findsOneWidget);
+
+    await tester.tap(find.text('تصوير ورفع صورة الاستلام'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.uploadPaths, ['/orders/o1/proof/pickup']);
+    expect(
+      api.patchCalls.where((call) => call['status'] == 'ON_THE_WAY'),
+      hasLength(1),
+    );
+    expect(find.text('التوجه لموقع التسليم'), findsOneWidget);
+  });
+
+  testWidgets('failed automatic start leaves a retryable picked-up stage', (
+    tester,
+  ) async {
+    final api = _FakeTripApi(await _preferences(), _order('ARRIVED_AT_PICKUP'))
+      ..failNextOnTheWayPatch = true;
+    await _pumpTrip(tester, api, proof: _fakeProof());
+
+    await tester.tap(find.text('استلمت الأوردر'));
+    await tester.pump();
+    await tester.tap(find.text('تصوير ورفع صورة الاستلام'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.uploadPaths, ['/orders/o1/proof/pickup']);
+    expect(api.patchCalls.where((call) => call['status'] == 'ON_THE_WAY'), hasLength(1));
+    expect(find.text('تم استلام الأوردر'), findsOneWidget);
+    expect(find.text('ابدأ التوصيل'), findsOneWidget);
+
+    await tester.tap(find.text('ابدأ التوصيل'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.patchCalls.where((call) => call['status'] == 'ON_THE_WAY'), hasLength(2));
+    expect(find.text('التوجه لموقع التسليم'), findsOneWidget);
+  });
+
+  testWidgets('picked-up trip resumes with an explicit start-delivery button', (
+    tester,
+  ) async {
     final api = _FakeTripApi(await _preferences(), _order('PICKED_UP'));
     await _pumpTrip(tester, api);
 
-    await tester.tap(find.text('بدء التوصيل للعميل'));
+    expect(find.text('تم استلام الأوردر'), findsOneWidget);
+    await tester.tap(find.text('ابدأ التوصيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 30));
 
     expect(api.patchCalls.single['status'], 'ON_THE_WAY');
-    expect(find.text('الشحنة في الطريق'), findsOneWidget);
+    expect(find.text('التوجه لموقع التسليم'), findsOneWidget);
   });
 
-  testWidgets('on-the-way trip asks for a delivery proof photo', (
-    tester,
-  ) async {
+  testWidgets('on-the-way trip uploads delivery proof', (tester) async {
     final api = _FakeTripApi(await _preferences(), _order('ON_THE_WAY'));
-    await _pumpTrip(tester, api);
+    await _pumpTrip(tester, api, proof: _fakeProof());
 
-    expect(find.text('تصوير التسليم وتأكيده'), findsOneWidget);
+    expect(find.text('وصلت لموقع التسليم'), findsOneWidget);
     expect(find.text('تفاصيل الشحنة'), findsOneWidget);
     expect(find.text('نقطة الاستلام'), findsOneWidget);
-    expect(find.text('نقطة التسليم'), findsOneWidget);
+    expect(find.text('نقطة التسليم'), findsNWidgets(2));
+
+    await tester.tap(find.text('وصلت لموقع التسليم'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.uploadPaths, ['/orders/o1/proof/delivery']);
+    expect(find.text('في انتظار تأكيد العميل'), findsNothing);
+    expect(find.text('تم التسليم'), findsOneWidget);
   });
 
   testWidgets('delivered trip shows the earnings summary while waiting', (
@@ -67,7 +130,8 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('تصوير التسليم وتأكيده'), findsNothing);
+    expect(find.text('وصلت لموقع التسليم'), findsNothing);
+    expect(find.text('اكتملت الرحلة'), findsNothing);
   });
 
   testWidgets('completed trip shows the final summary and timeline', (
@@ -90,7 +154,7 @@ void main() {
       ]
       ..proofs = [
         {'id': 'p1', 'type': 'PICKUP', 'hasPhoto': true},
-        {'id': 'p2', 'type': 'DELIVERY', 'hasPhoto': true},
+        {'id': 'p2', 'type': 'DELIVERED', 'hasPhoto': true},
       ];
     await _pumpTrip(tester, api);
 
@@ -155,12 +219,33 @@ void main() {
     expect(opened.last.path, '01000000000');
   });
 
-  testWidgets('cancelled trip hides every action button', (tester) async {
-    final api = _FakeTripApi(await _preferences(), _order('CANCELLED'));
-    await _pumpTrip(tester, api);
+  testWidgets('polling detects cancellation and leaves the trip', (tester) async {
+    final api = _FakeTripApi(await _preferences(), _order('ACCEPTED'));
+    final router = GoRouter(
+      initialLocation: '/captain/trip/o1',
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (_, _) => const Scaffold(body: Text('home')),
+        ),
+        GoRoute(
+          path: '/captain/trip/:id',
+          builder: (_, state) =>
+              CaptainTripScreen(orderId: state.pathParameters['id']!),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await _pumpTrip(tester, api, router: router);
 
-    expect(find.text('تم إلغاء الطلب'), findsOneWidget);
-    expect(find.byType(FilledButton), findsNothing);
+    api.order['status'] = 'CANCELLED';
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('home'), findsOneWidget);
+    expect(find.textContaining('تم إلغاء الطلب من العميل'), findsOneWidget);
+    expect(find.byKey(const ValueKey('trip-primary-action')), findsNothing);
   });
 }
 
@@ -170,6 +255,11 @@ Future<SharedPreferences> _preferences() async {
   });
   return SharedPreferences.getInstance();
 }
+
+TripProofPhoto _fakeProof() => TripProofPhoto(
+      Uint8List.fromList(const [1, 2, 3]),
+      'proof.jpg',
+    );
 
 Map<String, dynamic> _order(String status) => {
   'id': 'o1',
@@ -195,6 +285,8 @@ Future<void> _pumpTrip(
   _FakeTripApi api, {
   LocationService? locationService,
   UrlOpener? urlOpener,
+  TripProofPhoto? proof,
+  GoRouter? router,
 }) async {
   tester.view.physicalSize = const Size(800, 1600);
   tester.view.devicePixelRatio = 1;
@@ -210,10 +302,17 @@ Future<void> _pumpTrip(
   if (urlOpener != null) {
     overrides.add(urlOpenerProvider.overrideWithValue(urlOpener));
   }
+  if (proof != null) {
+    overrides.add(
+      tripProofPickerProvider.overrideWithValue(() async => proof),
+    );
+  }
   await tester.pumpWidget(
     ProviderScope(
       overrides: overrides,
-      child: const MaterialApp(home: CaptainTripScreen(orderId: 'o1')),
+      child: router != null
+          ? MaterialApp.router(routerConfig: router)
+          : const MaterialApp(home: CaptainTripScreen(orderId: 'o1')),
     ),
   );
   await tester.pump();
@@ -235,8 +334,10 @@ class _FakeTripApi extends ApiClient {
   final patchCalls = <Map<String, dynamic>>[];
   final postPaths = <String>[];
   final postData = <Map<String, dynamic>>[];
+  final uploadPaths = <String>[];
   List<dynamic> events = [];
   List<dynamic> proofs = [];
+  bool failNextOnTheWayPatch = false;
 
   @override
   Future<Map<String, dynamic>> getMap(
@@ -254,6 +355,10 @@ class _FakeTripApi extends ApiClient {
   Future<Map<String, dynamic>> patch(String path, {Object? data}) async {
     final body = data is Map ? Map<String, dynamic>.from(data) : {};
     patchCalls.add({'path': path, ...body});
+    if (failNextOnTheWayPatch && body['status'] == 'ON_THE_WAY') {
+      failNextOnTheWayPatch = false;
+      throw StateError('simulated auto-start failure');
+    }
     if (body['status'] is String) order['status'] = body['status'] as String;
     return <String, dynamic>{};
   }
@@ -262,6 +367,19 @@ class _FakeTripApi extends ApiClient {
   Future<Map<String, dynamic>> post(String path, {Object? data}) async {
     postPaths.add(path);
     postData.add(data is Map ? Map<String, dynamic>.from(data) : {});
+    return <String, dynamic>{};
+  }
+
+  @override
+  Future<Map<String, dynamic>> uploadFile(
+    String path,
+    Uint8List bytes,
+    String filename, {
+    String field = 'file',
+  }) async {
+    uploadPaths.add(path);
+    if (path.endsWith('/proof/pickup')) order['status'] = 'PICKED_UP';
+    if (path.endsWith('/proof/delivery')) order['status'] = 'DELIVERED';
     return <String, dynamic>{};
   }
 }

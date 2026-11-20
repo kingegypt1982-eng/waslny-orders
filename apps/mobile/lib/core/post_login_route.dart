@@ -10,6 +10,7 @@ const captainActiveTripStatuses = <String>{
   'ARRIVED_AT_PICKUP',
   'PICKED_UP',
   'ON_THE_WAY',
+  'DELIVERED',
 };
 
 /// Client statuses where the order still needs attention (tracking or the
