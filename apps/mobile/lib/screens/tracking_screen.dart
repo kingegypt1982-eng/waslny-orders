@@ -264,6 +264,8 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                             canceling: _canceling,
                             onConfirmDelivery: _confirmDelivery,
                             onCaptainTransition: _captainTransition,
+                            onOpenCaptainTrip: () =>
+                                context.push('/captain/trip/${order['id']}'),
                             rating: _rating,
                             ratingBusy: _ratingBusy,
                             ratingScore: _ratingScore,
@@ -566,6 +568,7 @@ class _TBody extends ConsumerWidget {
     required this.canceling,
     required this.onConfirmDelivery,
     required this.onCaptainTransition,
+    required this.onOpenCaptainTrip,
     required this.rating,
     required this.ratingBusy,
     required this.ratingScore,
@@ -577,6 +580,7 @@ class _TBody extends ConsumerWidget {
   final bool canceling;
   final VoidCallback onConfirmDelivery;
   final ValueChanged<String> onCaptainTransition;
+  final VoidCallback onOpenCaptainTrip;
   final Map<String, dynamic>? rating;
   final bool ratingBusy;
   final int ratingScore;
@@ -589,6 +593,10 @@ class _TBody extends ConsumerWidget {
     final status = order['status']?.toString() ?? 'PENDING';
     final role = ref.watch(sessionProvider)?['role'];
     final isClient = role == 'CLIENT';
+    // Pickup and delivery confirmations require photo proof. The shared trip
+    // screen owns that flow, so open it instead of calling PATCH /status here.
+    final needsProof =
+        status == 'ARRIVED_AT_PICKUP' || status == 'ON_THE_WAY';
     final captain = _trackCaptain(order);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -646,7 +654,9 @@ class _TBody extends ConsumerWidget {
             height: 50,
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () => onCaptainTransition(_captainNext[status]!.$1),
+              onPressed: needsProof
+                  ? onOpenCaptainTrip
+                  : () => onCaptainTransition(_captainNext[status]!.$1),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _tGreen,
                 foregroundColor: _tBg,
@@ -656,7 +666,7 @@ class _TBody extends ConsumerWidget {
               ),
               icon: const Icon(Icons.check_circle_outline_rounded),
               label: Text(
-                _captainNext[status]!.$2,
+                needsProof ? 'إتمام الخطوة في شاشة الرحلة' : _captainNext[status]!.$2,
                 style: const TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 15,

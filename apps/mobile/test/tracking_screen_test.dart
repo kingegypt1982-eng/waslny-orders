@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wasalny_orders/core/api_client.dart';
 import 'package:wasalny_orders/screens/tracking_screen.dart';
@@ -136,11 +137,61 @@ void main() {
     expect(find.byKey(const ValueKey('cancel-order-button')), findsNothing);
     expect(find.text('تم إلغاء الطلب'), findsOneWidget);
   });
+
+  testWidgets('proof steps open the captain trip screen instead of PATCH', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _TrackingApiClient(await _preferences(role: 'CAPTAIN'))
+      ..order['status'] = 'ARRIVED_AT_PICKUP'
+      ..order['captainId'] = 'captain-1';
+    final router = GoRouter(
+      initialLocation: '/track/order-1',
+      routes: [
+        GoRoute(
+          path: '/track/:id',
+          builder: (_, state) =>
+              TrackingScreen(orderId: state.pathParameters['id']!),
+        ),
+        GoRoute(
+          path: '/captain/trip/:id',
+          builder: (_, state) => Scaffold(
+            body: Text('trip ${state.pathParameters['id']}'),
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          preferencesProvider.overrideWithValue(api.preferences),
+          apiClientProvider.overrideWithValue(api),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('إتمام الخطوة في شاشة الرحلة'), findsOneWidget);
+    await tester.tap(find.text('إتمام الخطوة في شاشة الرحلة'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('trip order-1'), findsOneWidget);
+    expect(api.patchPaths, isEmpty);
+  });
 }
 
-Future<SharedPreferences> _preferences() async {
+Future<SharedPreferences> _preferences({String role = 'CLIENT'}) async {
+  SharedPreferences.resetStatic();
   SharedPreferences.setMockInitialValues({
-    'session_user': jsonEncode({'id': 'client-1', 'role': 'CLIENT'}),
+    'session_user': jsonEncode({'id': '$role-1', 'role': role}),
   });
   return SharedPreferences.getInstance();
 }
@@ -164,6 +215,7 @@ class _TrackingApiClient extends ApiClient {
 
   final postPaths = <String>[];
   final getPaths = <String>[];
+  final patchPaths = <String>[];
   final ratingPosts = <Map<String, dynamic>>[];
   Map<String, dynamic>? liveLocation;
   Map<String, dynamic>? savedRating;
@@ -200,6 +252,12 @@ class _TrackingApiClient extends ApiClient {
           ? <String, dynamic>{}
           : Map<String, dynamic>.from(savedRating!);
     }
+    return Map<String, dynamic>.from(order);
+  }
+
+  @override
+  Future<Map<String, dynamic>> patch(String path, {Object? data}) async {
+    patchPaths.add(path);
     return Map<String, dynamic>.from(order);
   }
 
