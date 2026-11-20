@@ -176,11 +176,9 @@ export class AuthService {
         expiresAt: new Date(Date.now() + 30 * 60 * 1000),
       },
     });
-    // TODO(prod): send the link through the email provider instead of logs.
-    if (process.env.NODE_ENV !== 'production') {
-      const base = process.env.PASSWORD_RESET_LINK_BASE ?? 'waslnyorders://reset-password?token=';
-      console.log(`[auth] password reset link for ${email}: ${base}${raw}`);
-    }
+    // TODO(prod): deliver the reset link through an email provider. The raw
+    // token is deliberately never logged: logs are accessible to anyone with
+    // operational access and would allow account takeover.
     return { message: 'If an account exists for this email, a reset link has been sent.' };
   }
 

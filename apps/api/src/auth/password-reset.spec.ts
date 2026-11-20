@@ -23,6 +23,7 @@ describe('Password reset (link-based)', () => {
   const pipe = new ValidationPipe({ whitelist: true, transform: true });
 
   beforeEach(() => jest.clearAllMocks());
+  afterEach(() => jest.restoreAllMocks());
 
   it('returns a generic message for unknown emails without creating a token', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
@@ -79,6 +80,21 @@ describe('Password reset (link-based)', () => {
     const ttl = new Date(data.expiresAt).getTime() - before;
     expect(ttl).toBeGreaterThan(29 * 60 * 1000);
     expect(ttl).toBeLessThanOrEqual(30 * 60 * 1000 + 5000);
+  });
+
+  it('never writes the reset link or raw token to the console', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u3',
+      googleId: null,
+      passwordHash: 'old-hash',
+    });
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await service.forgotPassword({ email: 'u3@waslny.com' });
+
+    expect(logSpy).not.toHaveBeenCalled();
+    const storedHash = prisma.passwordResetToken.create.mock.calls[0][0].data.token;
+    expect(logSpy.mock.calls.flat().join(' ')).not.toContain(storedHash);
   });
 
   it('resets the password and marks the token used', async () => {
