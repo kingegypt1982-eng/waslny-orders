@@ -28,7 +28,7 @@ class SupportContactScreen extends ConsumerWidget {
       _descriptionController.text = description!;
     }
     if (issueType != null) {
-      _issueController.text = issueType;
+      _issueController.text = issueType!;
     }
 
     return Scaffold(
@@ -144,7 +144,7 @@ class SupportContactScreen extends ConsumerWidget {
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    يرجى_إدخال_وصف_المشكلة;
+                    return 'يرجى إدخال وصف المشكلة';
                   }
                   return null;
                 },

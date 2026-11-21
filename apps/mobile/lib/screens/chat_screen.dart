@@ -9,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../core/api_client.dart';
 import '../core/firebase_chat_service.dart';
-import '../models/chat_message_model.dart';
 
 /// Screen for client-captain real-time chat
 class ChatScreen extends StatefulWidget {
@@ -31,12 +30,13 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final FirebaseChatService _chatService = FirebaseChatService();
+  final fcs.FirebaseChatService _chatService = fcs.FirebaseChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  late Stream<List<ChatMessage>> _messagesStream;
-  List<ChatMessage> _messages = [];
+  late Stream<List<fcs.ChatMessage>> _messagesStream;
+  List<fcs.ChatMessage> _messages = [];
+  List<ChatMessage> _messagesFromModel = [];
   bool _isLoading = true;
   String? _currentUserId;
   File? _pickedImageFile;

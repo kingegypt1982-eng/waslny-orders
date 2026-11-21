@@ -1,13 +1,10 @@
+import 'dart:io';
+
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:intl/intl.dart';
-
-/// Firebase Realtime Database Chat Service for real-time client-captain communication
-library;
-
-export 'firebase_chat_service.dart';
 
 /// Message type enum
 enum MessageType { text, image, file, system }
@@ -149,8 +146,8 @@ class FirebaseChatService {
     required String receiverId,
     required String role, // 'CLIENT' or 'CAPTAIN'
     required String orderId,
-    required MessageType type = MessageType.text,
-    required File? imageFile, // New parameter for images
+    MessageType type = MessageType.text,
+    File? imageFile, // New parameter for images
   }) async {
     final senderId = _auth.currentUser?.uid ?? '';
     final messageId = _db.ref('chat_messages/$orderId').push().key ?? '';
@@ -164,7 +161,7 @@ class FirebaseChatService {
       final imageRef = _storage.ref().child('chat_images/$orderId/$imageId');
       await imageRef.putFile(imageFile);
       final downloadUrl = await imageRef.getDownloadURL();
-      finalImageMessage imageMsg = ImageMessage(
+      final imageMsg = ImageMessage(
         imageId: imageId,
         downloadUrl: downloadUrl,
         filePath: 'chat_images/$orderId/$imageId',

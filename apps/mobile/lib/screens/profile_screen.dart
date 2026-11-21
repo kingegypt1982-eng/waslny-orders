@@ -84,6 +84,10 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  void _NavigateToSupportContact(BuildContext context) {
+    context.push('/support-contact', extra: {'orderId': '', 'captainId': ''});
+  }
+
   void _showPolicy(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,

@@ -1300,7 +1300,9 @@ class _TChatOverlay extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final chatService = ref.watch(firebaseChatServiceProvider);
     final currentUserId = chatService.getCurrentUserId();
-    final _messageController = TextEditingController();
+
+    // Listen to messages stream
+    final messagesStream = chatService.listenMessages(orderId);
 
     return Container(
       color: Colors.black54,
@@ -1337,7 +1339,10 @@ class _TChatOverlay extends ConsumerWidget {
                       ),
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.white),
-                        onPressed: () => setState(() => _showChat = false),
+                        onPressed: () {
+                          // Close chat overlay - notify parent via popping
+                          if (context.mounted) context.pop();
+                        },
                       ),
                     ],
                   ),
@@ -1345,7 +1350,7 @@ class _TChatOverlay extends ConsumerWidget {
                 const Divider(color: _tBorder),
                 Expanded(
                   child: StreamBuilder<List<ChatMessage>>(
-                    stream: chatService.listenMessages(orderId),
+                    stream: messagesStream,
                     builder: (context, snapshot) {
                       if (snapshot.hasError) {
                         return const Center(child: Text('حدث خطأ في التحميل'));
@@ -1357,6 +1362,7 @@ class _TChatOverlay extends ConsumerWidget {
                       if (messages.isEmpty) {
                         return const Center(child: Text('لا توجد رسائل بعد'));
                       }
+
                       return ListView.builder(
                         padding: const EdgeInsets.all(8),
                         itemCount: messages.length,
@@ -1396,7 +1402,7 @@ class _TChatOverlay extends ConsumerWidget {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '${_formatTime(msg.createdAt)}',
+                                    _formatTime(msg.createdAt),
                                     style: TextStyle(
                                       fontSize: 10,
                                       color: Colors.grey[500],
@@ -1411,48 +1417,12 @@ class _TChatOverlay extends ConsumerWidget {
                     },
                   ),
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _messageController,
-                        decoration: const InputDecoration(
-                          hintText: 'أدخل رسالة...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        ),
-                        onSubmitted: (_) => _sendMessage(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.send, color: Colors.indigo),
-                      onPressed: () => _sendMessage(),
-                    ),
-                  ],
-                  mainAxisSize: MainAxisSize.min,
-                ),
               ],
             ),
           ),
         ),
       ),
     );
-  }
-
-  void _sendMessage() {
-    final content = _messageController.text.trim();
-    if (content.isEmpty) return;
-    ref.read(firebaseChatServiceProvider).sendMessage(
-      content: content,
-      receiverId: counterpartId,
-      role: counterpartRole,
-      orderId: orderId,
-    );
-    _messageController.clear();
   }
 
   String _formatTime(DateTime date) {
