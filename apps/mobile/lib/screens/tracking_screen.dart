@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import '../core/api_client.dart';
 import '../core/json_utils.dart';
 import '../widgets/rating_input.dart';
+import '../core/firebase_chat_service.dart';
 
 /// Dark premium RTL tracking screen for Waslny Orders.
 ///
@@ -38,6 +39,7 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
   Timer? _timer;
   bool _canceling = false;
   final MapController _mapController = MapController();
+  bool _showChat = false;
 
   /// Latest captain heartbeat (from GET /orders/:id/location). The server is
   /// authoritative; a failed poll simply keeps the previous marker.
@@ -258,6 +260,7 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                     : 'طلب ${order['reference'] ?? ''}',
                 onBack: () => context.canPop() ? context.pop() : context.go('/'),
                 onRefresh: _load,
+                onOpenChat: () => setState(() => _showChat = !_showChat),
               ),
               if (order == null)
                 Expanded(
@@ -301,8 +304,13 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                 ),
               if (order != null && _canCancel(order))
                 _TCancelBar(canceling: _canceling, onCancel: _cancelOrder),
+              ],
+            ),
+            if (_showChat && order != null) ...[
+              const SizedBox(height: 8),
+              _TChatOverlay(orderId: widget.orderId, counterpartId: '', counterpartRole: '', counterpartName: 'المندوب'),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -328,11 +336,13 @@ class _THeader extends StatelessWidget {
     required this.subtitle,
     required this.onBack,
     required this.onRefresh,
+    required this.onOpenChat,
   });
   final String title;
   final String subtitle;
   final VoidCallback onBack;
   final VoidCallback onRefresh;
+  final VoidCallback onOpenChat;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
@@ -385,6 +395,11 @@ class _THeader extends StatelessWidget {
           onPressed: onRefresh,
           tooltip: 'تحديث',
           icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+        ),
+        IconButton(
+          onPressed: onOpenChat,
+          tooltip: 'فتح الدردشة',
+          icon: const Icon(Icons.chat, color: Colors.white),
         ),
       ],
     ),
@@ -1268,3 +1283,183 @@ String _tTime(DateTime value) {
 
 void _showTrackMessage(BuildContext context, String text) =>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+class _TChatOverlay extends ConsumerWidget {
+  const _TChatOverlay({
+    required this.orderId,
+    required this.counterpartId,
+    required this.counterpartRole,
+    required this.counterpartName,
+  });
+  final String orderId;
+  final String counterpartId;
+  final String counterpartRole;
+  final String counterpartName;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final chatService = ref.watch(firebaseChatServiceProvider);
+    final currentUserId = chatService.getCurrentUserId();
+    final _messageController = TextEditingController();
+
+    return Container(
+      color: Colors.black54,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Card(
+            color: _tCard,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: _tCardLight,
+                        child: Text(
+                          counterpartName.isEmpty ? '?' : counterpartName.characters.first,
+                          style: const TextStyle(color: _tGreen, fontSize: 16),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'الدردشة مع $counterpartName',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white),
+                        onPressed: () => setState(() => _showChat = false),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(color: _tBorder),
+                Expanded(
+                  child: StreamBuilder<List<ChatMessage>>(
+                    stream: chatService.listenMessages(orderId),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return const Center(child: Text('حدث خطأ في التحميل'));
+                      }
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final messages = snapshot.data ?? [];
+                      if (messages.isEmpty) {
+                        return const Center(child: Text('لا توجد رسائل بعد'));
+                      }
+                      return ListView.builder(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = messages[index];
+                          final isMe = msg.senderId == currentUserId;
+                          return Align(
+                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                              constraints: BoxConstraints(
+                                maxWidth: MediaQuery.of(context).size.width * 0.75,
+                              ),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: isMe ? Colors.indigo[100] : Colors.grey[200],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isMe ? 'أنا' : counterpartName,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey[600],
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    msg.content,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[800],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${_formatTime(msg.createdAt)}',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey[500],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _messageController,
+                        decoration: const InputDecoration(
+                          hintText: 'أدخل رسالة...',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send, color: Colors.indigo),
+                      onPressed: () => _sendMessage(),
+                    ),
+                  ],
+                  mainAxisSize: MainAxisSize.min,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _sendMessage() {
+    final content = _messageController.text.trim();
+    if (content.isEmpty) return;
+    ref.read(firebaseChatServiceProvider).sendMessage(
+      content: content,
+      receiverId: counterpartId,
+      role: counterpartRole,
+      orderId: orderId,
+    );
+    _messageController.clear();
+  }
+
+  String _formatTime(DateTime date) {
+    final now = DateTime.now();
+    if (date.day == now.day && date.month == now.month && date.year == now.year) {
+      return '${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+    }
+    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+  }
+}

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
+import 'core/firebase_chat_service.dart';
 import 'core/route_payload.dart';
 import 'core/texts.dart';
 import 'screens.dart';
@@ -19,6 +20,7 @@ import 'screens/register_screen.dart';
 import 'screens/route_fallback_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
+import 'screens/support_contact_screen.dart';
 
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +48,7 @@ Future<void> bootstrap() async {
 }
 
 final messagingReadyProvider = Provider<bool>((ref) => false);
+final firebaseChatServiceProvider = Provider<FirebaseChatService>((ref) => FirebaseChatService());
 
 /// Route prefixes that require a signed-in user. Public entry points
 /// (`/splash`, `/auth`, `/register`, `/reset-password`, `/captain-start`,
@@ -175,6 +178,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/notifications',
         builder: (context, state) => const NotificationsScreen(),
+      ),
+      GoRoute(
+        path: '/support-contact',
+        builder: (context, state) =>
+            SupportContactScreen(
+              orderId: state.extra is Map ? (state.extra as Map)['orderId'] as String? : null,
+              captainId: state.extra is Map ? (state.extra as Map)['captainId'] as String? : null,
+            ),
       ),
     ],
   );

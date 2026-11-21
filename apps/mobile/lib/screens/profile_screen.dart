@@ -243,6 +243,13 @@ class ProfileScreen extends ConsumerWidget {
                 subtitle: tr(ar: 'تواصل معنا', en: 'Contact us'),
                 onTap: () => _showHelp(context),
               ),
+              const SizedBox(height: 10),
+              _PTile(
+                icon: Icons.report_outlined,
+                title: tr(ar: 'بلاغ مشكلة', en: 'Report Issue'),
+                subtitle: tr(ar: 'ابلغ عن أي مشكلة مع الكابتن', en: 'Report issue with captain'),
+                onTap: () => _NavigateToSupportContact(context),
+              ),
               const SizedBox(height: 20),
               Text(
                 tr(ar: 'اللغة', en: 'Language'),
