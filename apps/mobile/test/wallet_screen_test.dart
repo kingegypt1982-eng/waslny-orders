@@ -109,7 +109,7 @@ void main() {
     }
 
     expect(
-      find.text('Amount must be between 50 and 10000 EGP'),
+      find.text('تعذر إتمام الطلب. تحقق من البيانات وحاول مجددًا.'),
       findsOneWidget,
     );
     expect(find.text('Top-up summary'), findsNothing);

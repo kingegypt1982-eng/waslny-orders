@@ -26,6 +26,11 @@ const _tBorder = Color(0xFF24515B);
 const _tDrop = Color(0xFFFF7955);
 const _tDanger = Color(0xFFFF6B6B);
 
+/// Chat service provider kept local so this screen does not import `app.dart`
+/// (which would create a circular import).
+final firebaseChatServiceProvider =
+    Provider<FirebaseChatService>((ref) => FirebaseChatService());
+
 class TrackingScreen extends ConsumerStatefulWidget {
   const TrackingScreen({super.key, required this.orderId});
   final String orderId;
@@ -251,66 +256,74 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
       child: Scaffold(
         backgroundColor: _tBg,
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              _THeader(
-                title: 'تتبع الشحنة',
-                subtitle: order == null
-                    ? '...'
-                    : 'طلب ${order['reference'] ?? ''}',
-                onBack: () => context.canPop() ? context.pop() : context.go('/'),
-                onRefresh: _load,
-                onOpenChat: () => setState(() => _showChat = !_showChat),
-              ),
-              if (order == null)
-                Expanded(
-                  child: _TLoadingState(error: _error, onRetry: _load),
-                )
-              else
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => Column(
-                      children: [
-                        SizedBox(
-                          height: constraints.maxHeight * 0.32,
-                          child: _TMap(
-                            order: order,
-                            mapController: _mapController,
-                            captainPoint: _captainPoint,
-                            captainSeenAt: _captainSeenAt,
-                          ),
+              Column(
+                children: [
+                  _THeader(
+                    title: 'تتبع الشحنة',
+                    subtitle: order == null
+                        ? '...'
+                        : 'طلب ${order['reference'] ?? ''}',
+                    onBack: () => context.canPop() ? context.pop() : context.go('/'),
+                    onRefresh: _load,
+                    onOpenChat: () => setState(() => _showChat = !_showChat),
+                  ),
+                  if (order == null)
+                    Expanded(
+                      child: _TLoadingState(error: _error, onRetry: _load),
+                    )
+                  else
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) => Column(
+                          children: [
+                            SizedBox(
+                              height: constraints.maxHeight * 0.32,
+                              child: _TMap(
+                                order: order,
+                                mapController: _mapController,
+                                captainPoint: _captainPoint,
+                                captainSeenAt: _captainSeenAt,
+                              ),
+                            ),
+                            Expanded(
+                              child: _TBody(
+                                order: order,
+                                canceling: _canceling,
+                                onConfirmDelivery: _confirmDelivery,
+                                onCaptainTransition: _captainTransition,
+                                onOpenCaptainTrip: () =>
+                                    context.push('/captain/trip/${order['id']}'),
+                                rating: _rating,
+                                ratingBusy: _ratingBusy,
+                                ratingHidden: _ratingHidden,
+                                ratingStars: _ratingStars,
+                                ratingComment: _ratingComment,
+                                onRatingStarsChanged: (stars) =>
+                                    setState(() => _ratingStars = stars),
+                                onSubmitRating: _submitRating,
+                              ),
+                            ),
+                          ],
                         ),
-                        Expanded(
-                          child: _TBody(
-                            order: order,
-                            canceling: _canceling,
-                            onConfirmDelivery: _confirmDelivery,
-                            onCaptainTransition: _captainTransition,
-                            onOpenCaptainTrip: () =>
-                                context.push('/captain/trip/${order['id']}'),
-                            rating: _rating,
-                            ratingBusy: _ratingBusy,
-                            ratingHidden: _ratingHidden,
-                            ratingStars: _ratingStars,
-                            ratingComment: _ratingComment,
-                            onRatingStarsChanged: (stars) =>
-                                setState(() => _ratingStars = stars),
-                            onSubmitRating: _submitRating,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
+                  if (order != null && _canCancel(order))
+                    _TCancelBar(canceling: _canceling, onCancel: _cancelOrder),
+                ],
+              ),
+              if (_showChat && order != null)
+                Positioned.fill(
+                  child: _TChatOverlay(
+                    orderId: widget.orderId,
+                    counterpartId: '',
+                    counterpartRole: '',
+                    counterpartName: 'المندوب',
                   ),
                 ),
-              if (order != null && _canCancel(order))
-                _TCancelBar(canceling: _canceling, onCancel: _cancelOrder),
-              ],
-            ),
-            if (_showChat && order != null) ...[
-              const SizedBox(height: 8),
-              _TChatOverlay(orderId: widget.orderId, counterpartId: '', counterpartRole: '', counterpartName: 'المندوب'),
             ],
-          ],
+          ),
         ),
       ),
     );

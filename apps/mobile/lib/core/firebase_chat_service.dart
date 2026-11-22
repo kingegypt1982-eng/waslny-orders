@@ -2,9 +2,7 @@ import 'dart:io';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:intl/intl.dart';
 
 /// Message type enum
 enum MessageType { text, image, file, system }
@@ -124,21 +122,6 @@ class FirebaseChatService {
   final FirebaseDatabase _db = FirebaseDatabase.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
-
-  /// Reference to messages collection for a specific order
-  DatabaseReference _getOrderMessagesRef(String orderId) {
-    return _db.ref('chat_messages/$orderId');
-  }
-
-  /// Reference to messages for a specific user
-  DatabaseReference _getUserMessagesRef(String userId) {
-    return _db.ref('user_messages/$userId');
-  }
-
-  /// Reference to image storage for a specific order
-  Reference _getImageReference(String orderId, String imageId) {
-    return _storage.ref().child('chat_images/$orderId/$imageId');
-  }
 
   /// Send a new message
   Future<String> sendMessage({

@@ -131,6 +131,10 @@ void main() {
       addTearDown(() => appLanguage.value = 'ar');
       await _pumpProfile(tester, api);
 
+      // The language control lives at the bottom of the profile ListView, so
+      // it is only built after scrolling it into view.
+      await tester.scrollUntilVisible(find.text('English'), 200);
+      await tester.pumpAndSettle();
       expect(
         tester
             .widget<SegmentedButton<String>>(
@@ -139,8 +143,6 @@ void main() {
             .selected,
         {'ar'},
       );
-      await tester.scrollUntilVisible(find.text('English'), 200);
-      await tester.pumpAndSettle();
       await tester.tap(find.text('English'));
       await tester.pump();
 

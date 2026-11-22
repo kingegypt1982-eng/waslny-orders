@@ -260,7 +260,10 @@ void main() {
     await tester.tap(find.text('Create account'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Email is already registered'), findsOneWidget);
+    expect(
+      find.text('تعذر إتمام الطلب بسبب تعارض في الحالة. حاول مجددًا.'),
+      findsOneWidget,
+    );
     expect(router.routeInformationProvider.value.uri.path, '/register');
   });
 

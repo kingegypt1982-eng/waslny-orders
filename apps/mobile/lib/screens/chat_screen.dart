@@ -1,13 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../core/api_client.dart';
 import '../core/firebase_chat_service.dart';
 
 /// Screen for client-captain real-time chat
@@ -30,13 +26,12 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final fcs.FirebaseChatService _chatService = fcs.FirebaseChatService();
+  final FirebaseChatService _chatService = FirebaseChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  late Stream<List<fcs.ChatMessage>> _messagesStream;
-  List<fcs.ChatMessage> _messages = [];
-  List<ChatMessage> _messagesFromModel = [];
+  late final StreamSubscription<List<ChatMessage>> _messagesSubscription;
+  List<ChatMessage> _messages = [];
   bool _isLoading = true;
   String? _currentUserId;
   File? _pickedImageFile;
@@ -45,7 +40,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _currentUserId = _chatService.getCurrentUserId();
-    _messagesStream = _chatService.listenMessages(widget.orderId).listen((messages) {
+    _messagesSubscription = _chatService.listenMessages(widget.orderId).listen((messages) {
       if (mounted) {
         setState(() {
           _messages = messages;
@@ -57,6 +52,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _messagesSubscription.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -88,7 +84,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     final content = _messageController.text.trim();
     if (content.isEmpty && _pickedImageFile == null) return;
 
@@ -108,8 +104,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isClient = widget.counterpartRole == 'CLIENT';
-
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -197,7 +191,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   // Display image
                   InteractiveViewer(
                     panEnabled: true,
-                    zoomEnabled: true,
                     child: Image.network(
                       message.content,
                       width: double.infinity,
@@ -300,12 +293,12 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: TextField(
               controller: _messageController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'أدخل رسالة...',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
               onSubmitted: (_) => _sendMessage(),
             ),

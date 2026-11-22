@@ -1,6 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-
 /// Message type enum
 enum MessageType { text, image, file, system }
 
@@ -28,7 +25,7 @@ class ChatMessage {
     this.readBy,
     this.readAt,
     this.orderId,
-  }
+  });
 
   factory ChatMessage.fromMap(Map<String, dynamic> map, String id) {
     return ChatMessage(
@@ -56,7 +53,7 @@ class ChatMessage {
       'readBy': readBy,
       'readAt': readAt?.toIso8601String(),
       'orderId': orderId,
-    }
+    };
   }
 
   static MessageType _stringToMessageType(String type) {
@@ -71,3 +68,4 @@ class ChatMessage {
         return MessageType.text;
     }
   }
+}
