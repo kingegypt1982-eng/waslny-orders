@@ -27,7 +27,11 @@ export class AdminService {
   ) {}
 
   async dashboard() {
-    const [clients, captains, pendingCaptains, openOrders, totalOrders, completed, recentOrders] = await Promise.all([
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const [clients, captains, pendingCaptains, openOrders, totalOrders, completed, recentOrders, pastCompletedOrders] = await Promise.all([
       this.prisma.user.count({ where: { role: UserRole.CLIENT } }),
       this.prisma.captainProfile.count({ where: { status: CaptainStatus.ACTIVE } }),
       this.prisma.captainProfile.count({ where: { status: CaptainStatus.PENDING } }),
@@ -35,13 +39,43 @@ export class AdminService {
       this.prisma.order.count(),
       this.prisma.order.aggregate({ where: { status: OrderStatus.COMPLETED }, _count: { id: true }, _sum: { price: true, commission: true } }),
       this.prisma.order.findMany({ take: 8, orderBy: { createdAt: 'desc' }, include: { client: { select: { name: true } }, captain: { select: { name: true } } } }),
+      this.prisma.order.findMany({
+        where: {
+          status: OrderStatus.COMPLETED,
+          createdAt: { gte: sevenDaysAgo },
+        },
+        select: { createdAt: true, price: true, commission: true },
+      }),
     ]);
+
+    const dayMap = new Map<string, { date: string; day: string; revenue: number; commission: number; orders: number }>();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      dayMap.set(iso, { date: iso, day: dayName, revenue: 0, commission: 0, orders: 0 });
+    }
+
+    if (Array.isArray(pastCompletedOrders)) {
+      for (const order of pastCompletedOrders) {
+        const iso = order.createdAt ? new Date(order.createdAt).toISOString().slice(0, 10) : '';
+        const entry = dayMap.get(iso);
+        if (entry) {
+          entry.revenue += Number(order.price ?? 0);
+          entry.commission += Number(order.commission ?? 0);
+          entry.orders += 1;
+        }
+      }
+    }
+
     return {
       clients, captains, pendingCaptains, openOrders, totalOrders,
       completedOrders: completed._count.id,
       revenue: Number(completed._sum.price ?? 0),
       commission: Number(completed._sum.commission ?? 0),
       recentOrders,
+      weeklyRevenue: Array.from(dayMap.values()),
     };
   }
 

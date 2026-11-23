@@ -1,18 +1,19 @@
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
-import 'core/firebase_chat_service.dart';
-import 'core/firebase_options.dart';
+import 'core/chat_config.dart';
+import 'core/firebase_bootstrap.dart';
 import 'core/route_payload.dart';
 import 'core/texts.dart';
 import 'screens.dart';
 import 'screens/captain_availability_screen.dart';
 import 'screens/captain_start_screen.dart';
 import 'screens/captain_trip_screen.dart';
+import 'screens/chat_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'screens/order_review_screen.dart';
@@ -21,45 +22,69 @@ import 'screens/register_screen.dart';
 import 'screens/route_fallback_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
-import 'screens/support_contact_screen.dart';
 
-Future<void> bootstrap() async {
+void bootstrap() {
   WidgetsFlutterBinding.ensureInitialized();
-  final preferences = await SharedPreferences.getInstance();
-  appLanguage.value = preferences.getString('app_language') == 'en'
-      ? 'en'
-      : 'ar';
 
-  // Initialize Firebase with dart-define or default options
-  var messagingReady = false;
-  try {
-    await Firebase.initializeApp(
-      options: FirebaseOptionsBuilder.build(),
-    );
-    await FirebaseMessaging.instance.requestPermission();
-    messagingReady = true;
-  } catch (e) {
-    // Firebase initialization failed - app may still work for non-Firebase features
-    // Chat features will be disabled
-    if (e.toString().contains('duplicateApp')) {
-      // Firebase already initialized, ignore
-    } else {
-      messagingReady = false;
-    }
-  }
-  runApp(
-    ProviderScope(
-      overrides: [
-        preferencesProvider.overrideWithValue(preferences),
-        messagingReadyProvider.overrideWithValue(messagingReady),
-      ],
-      child: const WasalnyApp(),
-    ),
+  // A simple Arabic error screen instead of a white page on startup crashes.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    _showFatalScreen();
+  };
+
+  runZonedGuarded(
+    () async {
+      final preferences = await SharedPreferences.getInstance();
+      appLanguage.value = preferences.getString('app_language') == 'en'
+          ? 'en'
+          : 'ar';
+
+      // The UI is drawn first; Firebase (when enabled) is initialized later,
+      // off the startup path, with its own timeout.
+      runApp(
+        ProviderScope(
+          overrides: [
+            preferencesProvider.overrideWithValue(preferences),
+          ],
+          child: const WasalnyApp(),
+        ),
+      );
+
+      if (kChatEnabled) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(initializeChatFirebase());
+        });
+      }
+    },
+    (_, __) => _showFatalScreen(),
   );
 }
 
-final messagingReadyProvider = Provider<bool>((ref) => false);
-final firebaseChatServiceProvider = Provider<FirebaseChatService>((ref) => FirebaseChatService());
+bool _fatalShown = false;
+
+void _showFatalScreen() {
+  if (_fatalShown) return;
+  _fatalShown = true;
+  runApp(
+    const Directionality(
+      textDirection: TextDirection.rtl,
+      child: MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'حدث خطأ أثناء تشغيل التطبيق. أعد المحاولة لاحقًا.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 18),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
 
 /// Route prefixes that require a signed-in user. Public entry points
 /// (`/splash`, `/auth`, `/register`, `/reset-password`, `/captain-start`,
@@ -69,6 +94,7 @@ const _protectedRoutePrefixes = <String>[
   '/order-review',
   '/captain/availability',
   '/captain/trip',
+  '/chat',
   '/track',
   '/wallet',
   '/notifications',
@@ -178,6 +204,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) =>
             TrackingScreen(orderId: state.pathParameters['id']!),
       ),
+      if (kChatEnabled)
+        GoRoute(
+          path: '/chat/:orderId',
+          builder: (context, state) {
+            final extra = state.extra is Map ? state.extra as Map : const {};
+            return ChatScreen(
+              orderId: state.pathParameters['orderId']!,
+              counterpartId: extra['counterpartId']?.toString() ?? '',
+              counterpartRole: extra['counterpartRole']?.toString() ?? '',
+              counterpartName: extra['counterpartName']?.toString() ?? '',
+            );
+          },
+        ),
       GoRoute(
         path: '/wallet',
         builder: (context, state) => const WalletScreen(),
@@ -190,14 +229,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/notifications',
         builder: (context, state) => const NotificationsScreen(),
       ),
-      GoRoute(
-        path: '/support-contact',
-        builder: (context, state) =>
-            SupportContactScreen(
-              orderId: state.extra is Map ? (state.extra as Map)['orderId'] as String? : null,
-              captainId: state.extra is Map ? (state.extra as Map)['captainId'] as String? : null,
-            ),
-      ),
+
     ],
   );
   return router;

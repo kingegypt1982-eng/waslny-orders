@@ -1,9 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderStatus } from '@prisma/client';
-import { Database, getDatabase } from 'firebase-admin/database';
-import { App } from 'firebase-admin/app';
+import { Database } from 'firebase-admin/database';
+import { FirebaseService } from './firebase.service';
 
 export interface ChatMeta {
   orderId: string;
@@ -16,20 +16,24 @@ export interface ChatMeta {
 }
 
 @Injectable()
-export class ChatService {
+export class ChatService implements OnModuleInit {
   private readonly logger = new Logger(ChatService.name);
   private database: Database | null = null;
   private readonly cleanupDays: number;
+  private readonly enabled: boolean;
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly firebase: FirebaseService,
   ) {
     this.cleanupDays = this.config.get<number>('CHAT_CLEANUP_DAYS') ?? 7;
+    this.enabled = this.config.get<boolean>('CHAT_ENABLED') ?? false;
   }
 
-  setDatabase(app: App) {
-    this.database = getDatabase(app);
+  onModuleInit() {
+    if (!this.enabled) return;
+    this.database = this.firebase.getDatabase();
   }
 
   private getChatsRef() {
@@ -52,6 +56,7 @@ export class ChatService {
    * Called from OrdersService.accept()
    */
   async createChatForOrder(orderId: string): Promise<void> {
+    if (!this.enabled) return;
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: { clientId: true, captainId: true, status: true },
@@ -91,6 +96,7 @@ export class ChatService {
     orderId: string,
     reason: 'COMPLETED' | 'CANCELLED' | 'REASSIGNED',
   ): Promise<void> {
+    if (!this.enabled) return;
     const metaRef = this.getMetaRef(orderId);
     const snapshot = await metaRef.once('value');
 

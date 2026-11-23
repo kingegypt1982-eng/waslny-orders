@@ -1,8 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'firebase_identity.dart';
 
 final preferencesProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError(),
@@ -46,10 +51,7 @@ class ApiClient {
   ApiClient(this.preferences)
     : dio = Dio(
         BaseOptions(
-          baseUrl: const String.fromEnvironment(
-            'API_BASE_URL',
-            defaultValue: 'http://10.0.2.2:3000/api/v1',
-          ),
+          baseUrl: _resolveBaseUrl(),
           connectTimeout: const Duration(seconds: 10),
           receiveTimeout: const Duration(seconds: 20),
           headers: {'Content-Type': 'application/json'},
@@ -75,6 +77,33 @@ class ApiClient {
         },
       ),
     );
+  }
+
+  /// Resolves the API base URL, ensuring it includes the global prefix.
+  /// The backend uses a global prefix of 'api/v1', so the base URL must
+  /// end with '/api/v1' for routes like /auth/register to work correctly.
+  ///
+  /// Usage:
+  ///   flutter build apk --dart-define=API_BASE_URL=http://10.0.2.2:3000/api/v1
+  ///   flutter build apk --dart-define=API_BASE_URL=https://api.waslny.com/api/v1
+  static String _resolveBaseUrl() {
+    final envUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: '');
+
+    // If no URL provided via dart-define, use Android emulator default
+    if (envUrl.isEmpty) {
+      return 'http://10.0.2.2:3000/api/v1';
+    }
+
+    // If URL doesn't end with /api/v1, append it
+    // The backend global prefix is 'api/v1'
+    final normalized = envUrl.endsWith('/')
+        ? envUrl.substring(0, envUrl.length - 1)
+        : envUrl;
+    if (!normalized.endsWith('/api/v1')) {
+      return '$normalized/api/v1';
+    }
+
+    return normalized;
   }
 
   final SharedPreferences preferences;
@@ -126,16 +155,17 @@ class ApiClient {
 
   Future<void> saveSession(Map<String, dynamic> payload) async {
     final user = Map<String, dynamic>.from(payload['user'] as Map);
-    await preferences.setString(
-      'access_token',
-      payload['accessToken'] as String,
-    );
+    final token = payload['accessToken'] as String;
+    await preferences.setString('access_token', token);
     await preferences.setString('session_user', jsonEncode(user));
+    // Chat-only custom-token bridge; never blocks the NestJS login.
+    unawaited(signInFirebaseWithCustomToken(dio, token));
   }
 
   Future<void> clearSession() async {
     await preferences.remove('access_token');
     await preferences.remove('session_user');
+    unawaited(signOutFirebase());
   }
 
   /// Duplicate ratings answer 409; screens treat that as "already rated".

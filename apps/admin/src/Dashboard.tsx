@@ -19,7 +19,17 @@ type Captain = {
 }
 type Client = { id: string; name: string; email: string; phone?: string; suspendedAt?: string | null; createdAt?: string; _count?: { clientOrders: number } }
 type WalletRecord = { id: string; name: string; email: string; wallet: { balance: number } | null; walletTransactions: { id: string; amount: number; type: string; createdAt: string; note?: string | null }[] }
-type DashboardData = { clients: number; captains: number; pendingCaptains: number; openOrders: number; completedOrders: number; revenue: number; commission: number; recentOrders: Order[] }
+type DashboardData = {
+  clients: number
+  captains: number
+  pendingCaptains: number
+  openOrders: number
+  completedOrders: number
+  revenue: number
+  commission: number
+  recentOrders: Order[]
+  weeklyRevenue?: { date: string; day: string; revenue: number; commission: number; orders: number }[]
+}
 type Pricing = { basePrice: number; pricePerKm: number; commissionPercent: number; minimumWalletBalance: number }
 
 const navigation: { label: string; to: string; icon: typeof Users; stat?: 'openOrders' | 'pendingCaptains' }[] = [
@@ -111,6 +121,51 @@ function Toolbar({ value, setValue, placeholder }: { value: string; setValue: (v
   return <div className="table-toolbar"><label className="search-field"><Search size={16} /><input value={value} onChange={(event) => setValue(event.target.value)} placeholder={placeholder} /></label><button className="icon-button filter-button" aria-label="Filter results"><Activity size={16} /></button></div>
 }
 
+function RevenueChart({ data }: { data?: { date: string; day: string; revenue: number; commission: number; orders: number }[] }) {
+  if (!data || data.length === 0) {
+    return <div className="chart-placeholder">لا توجد بيانات تسليم مسجلة لهذا الأسبوع بعد.</div>
+  }
+  const maxRevenue = Math.max(...data.map((d) => d.revenue), 50)
+  const totalRevenue = data.reduce((sum, d) => sum + d.revenue, 0)
+  const totalCommission = data.reduce((sum, d) => sum + d.commission, 0)
+
+  return (
+    <>
+      <div className="chart-legend">
+        <span><i /> Gross delivery ({money(totalRevenue)})</span>
+        <span style={{ marginLeft: 14 }}><i style={{ background: '#bc8150' }} /> Commission ({money(totalCommission)})</span>
+        <strong>7-Day Performance</strong>
+      </div>
+      <div className="chart-wrap" style={{ display: 'flex', alignItems: 'flex-end', gap: '10px', padding: '16px 4px 6px' }}>
+        {data.map((item, idx) => {
+          const heightPct = Math.max(8, Math.round((item.revenue / maxRevenue) * 100))
+          return (
+            <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
+              <span style={{ fontSize: '9px', color: '#278263', fontWeight: 600, marginBottom: '4px' }}>
+                {item.revenue > 0 ? `${item.revenue}` : ''}
+              </span>
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: '34px',
+                  height: `${heightPct}%`,
+                  background: 'linear-gradient(180deg, #247c62 0%, #2fb38f 100%)',
+                  borderRadius: '4px 4px 0 0',
+                  transition: 'height 0.3s ease',
+                }}
+                title={`${item.day} (${item.date}): ${money(item.revenue)} - ${item.orders} orders`}
+              />
+              <span style={{ fontSize: '10px', color: '#7b8980', marginTop: '6px', fontWeight: 500 }}>
+                {item.day}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
 function Overview() {
   const dashboard = useData<DashboardData>('dashboard', '/admin/dashboard')
   const orders = useData<Order[]>('orders', '/admin/orders')
@@ -121,7 +176,7 @@ function Overview() {
     <QueryError error={dashboard.error} retry={dashboard.refetch} />
     <QueryError error={orders.error} retry={orders.refetch} />
     <section className="metric-grid"><Metric label="Gross delivery value" value={money(data?.revenue ?? 0)} icon={CircleDollarSign} /><Metric label="Orders in progress" value={String(data?.openOrders ?? 0)} icon={ClipboardList} tone="blue" /><Metric label="Active captains" value={String(data?.captains ?? 0)} icon={Bike} tone="orange" /><Metric label="Registered clients" value={String(data?.clients ?? 0)} icon={Users} tone="rose" /></section>
-    <section className="overview-grid"><article className="panel activity-panel"><div className="panel-heading"><div><div className="panel-kicker">PERFORMANCE</div><h2>Delivery activity</h2></div></div><div className="chart-placeholder">غير متاح بعد — لا توجد سلسلة إيرادات منشورة من الـ API حتى الآن.</div></article>
+    <section className="overview-grid"><article className="panel activity-panel"><div className="panel-heading"><div><div className="panel-kicker">PERFORMANCE</div><h2>Delivery activity</h2></div></div><RevenueChart data={data?.weeklyRevenue} /></article>
       <article className="panel attention-panel"><div className="panel-heading"><div><div className="panel-kicker">NEEDS ATTENTION</div><h2>On your radar</h2></div><span className="attention-count">{data?.pendingCaptains ?? 0}</span></div><div className="attention-list"><Link to="/captains" className="attention-item"><span className="attention-icon attention-amber"><ShieldCheck size={17} /></span><span><strong>Captain applications</strong><small>{data?.pendingCaptains ?? 0} waiting for review</small></span><ArrowRight size={16} /></Link></div><div className="attention-footer"><span><i /> Pending applications show up here from live data</span></div></article></section>
     <section className="panel table-panel"><div className="panel-heading table-heading"><div><div className="panel-kicker">LIVE OPERATIONS</div><h2>Recent orders</h2></div><Link to="/orders" className="text-link">View all orders <ArrowRight size={15} /></Link></div>{orders.error ? null : rows.length === 0 ? <div className="empty-inline">{orders.isPending ? 'Loading…' : 'No orders yet.'}</div> : <OrdersTable rows={rows.slice(0, 5)} />}</section><div className="dashboard-foot"><span><i /> {dashboard.isPending ? 'Loading…' : dashboard.error ? 'Stats unavailable' : 'Updated just now'}</span><span>Delivery commission earned <strong>{money(data?.commission ?? 0)}</strong> this month</span></div>
   </>
@@ -326,7 +381,7 @@ function WalletsPage() {
 function ReportsPage() {
   const reports = useData<DashboardData>('dashboard', '/admin/dashboard')
   const data = reports.data
-  return <><Heading eyebrow="BUSINESS INTELLIGENCE" title="Reports" description="A clear read on completed deliveries and company earnings." action={<button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export report</button>} /><QueryError error={reports.error} retry={reports.refetch} /><section className="metric-grid report-metrics"><Metric label="Completed deliveries" value={Number(data?.completedOrders ?? 0).toLocaleString()} icon={Check} /><Metric label="Gross delivery value" value={money(data?.revenue ?? 0)} icon={ArrowUpRight} tone="blue" /><Metric label="Company commission" value={money(data?.commission ?? 0)} icon={CircleDollarSign} tone="orange" /></section><section className="panel activity-panel report-chart"><div className="panel-heading"><div><div className="panel-kicker">WEEKLY PERFORMANCE</div><h2>Delivery value</h2></div><span className="select-control">This week</span></div><div className="chart-placeholder">غير متاح بعد — لا توجد سلسلة إيرادات أسبوعية منشورة من الـ API حتى الآن.</div></section></>
+  return <><Heading eyebrow="BUSINESS INTELLIGENCE" title="Reports" description="A clear read on completed deliveries and company earnings." action={<button className="button button-outline" onClick={() => window.print()}><Download size={15} /> Export report</button>} /><QueryError error={reports.error} retry={reports.refetch} /><section className="metric-grid report-metrics"><Metric label="Completed deliveries" value={Number(data?.completedOrders ?? 0).toLocaleString()} icon={Check} /><Metric label="Gross delivery value" value={money(data?.revenue ?? 0)} icon={ArrowUpRight} tone="blue" /><Metric label="Company commission" value={money(data?.commission ?? 0)} icon={CircleDollarSign} tone="orange" /></section><section className="panel activity-panel report-chart"><div className="panel-heading"><div><div className="panel-kicker">WEEKLY PERFORMANCE</div><h2>Delivery value</h2></div><span className="select-control">This week</span></div><RevenueChart data={data?.weeklyRevenue} /></section></>
 }
 function SettingsPage() {
   const token = localStorage.getItem('wasalny-admin-token')

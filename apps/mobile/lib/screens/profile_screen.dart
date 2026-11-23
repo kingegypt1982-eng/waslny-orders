@@ -85,10 +85,6 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _NavigateToSupportContact(BuildContext context) {
-    context.push('/support-contact', extra: {'orderId': '', 'captainId': ''});
-  }
-
   void _showPolicy(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -257,13 +253,6 @@ class ProfileScreen extends ConsumerWidget {
                 title: tr(ar: 'المساعدة والدعم', en: 'Help and support'),
                 subtitle: tr(ar: 'تواصل معنا', en: 'Contact us'),
                 onTap: () => _showHelp(context),
-              ),
-              const SizedBox(height: 10),
-              _PTile(
-                icon: Icons.report_outlined,
-                title: tr(ar: 'بلاغ مشكلة', en: 'Report Issue'),
-                subtitle: tr(ar: 'ابلغ عن أي مشكلة مع الكابتن', en: 'Report issue with captain'),
-                onTap: () => _NavigateToSupportContact(context),
               ),
               const SizedBox(height: 20),
               Text(

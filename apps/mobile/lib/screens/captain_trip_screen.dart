@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../core/api_client.dart';
+import '../core/chat_config.dart';
 import '../core/json_utils.dart';
 import '../core/location_service.dart';
 import '../core/texts.dart';
@@ -401,6 +402,14 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
                         padding: const EdgeInsets.fromLTRB(18, 14, 18, 26),
                         children: [
                           _stepCard(),
+                          if (kChatEnabled &&
+                              (_status == 'ACCEPTED' ||
+                                  _status == 'ARRIVED_AT_PICKUP' ||
+                                  _status == 'PICKED_UP' ||
+                                  _status == 'ON_THE_WAY')) ...[
+                            const SizedBox(height: 14),
+                            _chatButton(),
+                          ],
                           if (_status == 'ACCEPTED' || _status == 'ON_THE_WAY') ...[
                             const SizedBox(height: 14),
                             _navigationCard(),
@@ -424,6 +433,32 @@ class _CaptainTripScreenState extends ConsumerState<CaptainTripScreen> {
                       ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Opens the real chat screen with the client's Waslny user id and role.
+  Widget _chatButton() {
+    final clientId = _order['clientId']?.toString() ?? '';
+    final client = _order['client'];
+    final name = client is Map ? client['name']?.toString() ?? '' : '';
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        key: const ValueKey('trip-chat-button'),
+        onPressed: clientId.isEmpty
+            ? null
+            : () => context.push(
+                  '/chat/${widget.orderId}',
+                  extra: {
+                    'counterpartId': clientId,
+                    'counterpartRole': 'CLIENT',
+                    'counterpartName':
+                        name.isEmpty ? tr(ar: 'العميل', en: 'Client') : name,
+                  },
+                ),
+        icon: const Icon(Icons.chat_bubble_outline),
+        label: Text(tr(ar: 'الدردشة مع العميل', en: 'Chat with client')),
       ),
     );
   }
