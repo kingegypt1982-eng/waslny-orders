@@ -89,8 +89,11 @@ class ApiClient {
   static String _resolveBaseUrl() {
     final envUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: '');
 
-    // If no URL provided via dart-define, use Android emulator default
+    // If no URL provided via dart-define, use web default or Android emulator default
     if (envUrl.isEmpty) {
+      if (kIsWeb) {
+        return 'http://localhost:3000/api/v1';
+      }
       return 'http://10.0.2.2:3000/api/v1';
     }
 
