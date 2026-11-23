@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api_client.dart';
@@ -13,10 +12,11 @@ import 'google_auth_types.dart';
 /// ID the API verifies as the token audience. A web OAuth client ID is not a
 /// secret: it is visible in every browser request.
 ///
-/// Native builds keep their own client configuration (google-services.json /
-/// GoogleService-Info.plist), so no network call is made there.
+/// This is needed on **native** too: Android's `GoogleSignIn` only returns an
+/// `idToken` when `serverClientId` is supplied, and the API verifies that exact
+/// audience. Without it the button reports an invalid credential even when
+/// `google-services.json` and the Google Cloud OAuth client are correct.
 final googleClientIdProvider = FutureProvider<String?>((ref) async {
-  if (!kIsWeb) return null;
   if (!isUnusableGoogleClientId(googleWebClientId)) return googleWebClientId;
   try {
     final config = await ref.read(apiClientProvider).getMap('/auth/google/config');

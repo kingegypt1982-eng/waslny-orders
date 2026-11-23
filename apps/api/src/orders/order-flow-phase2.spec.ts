@@ -9,6 +9,7 @@ import { OrderEventsService } from '../order-events/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
 import { OrdersService } from './orders.service';
+import { ChatService } from '../firebase/chat.service';
 
 describe('Order flow phase 2 guards, location and rating', () => {
   const tx: any = {
@@ -36,6 +37,7 @@ describe('Order flow phase 2 guards, location and rating', () => {
   };
   const redis: any = { updateCaptainLocation: jest.fn().mockResolvedValue(true), nearbyCaptains: jest.fn() };
   const notifications: any = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
+  const chat = { createChatForOrder: jest.fn(), closeChatForOrder: jest.fn(), reassignChat: jest.fn() };
   const orderEvents = new OrderEventsService(prisma as PrismaService);
   const policies: any = { hasAcknowledgement: jest.fn().mockResolvedValue({ id: 'ack1' }) };
   const service = new OrdersService(
@@ -44,6 +46,7 @@ describe('Order flow phase 2 guards, location and rating', () => {
     notifications as NotificationsService,
     orderEvents,
     policies,
+    chat as any,
   );
 
   beforeEach(() => {

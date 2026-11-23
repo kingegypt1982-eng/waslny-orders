@@ -1,0 +1,54 @@
+{
+  "rules": {
+    "chats": {
+      "meta": {
+        "$orderId": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || data.child('clientId').val() === auth.uid || data.child('captainId').val() === auth.uid)",
+          ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || (!data.exists() && newData.child('clientId').val() === auth.uid && newData.child('captainId').val() != auth.uid) || (data.child('clientId').val() === auth.uid || data.child('captainId').val() === auth.uid))",
+          "clientId": { ".validate": "newData.isString() && newData.val().length > 0" },
+          "captainId": { ".validate": "newData.isString() && newData.val().length > 0" },
+          "orderId": { ".validate": "newData.isString() && newData.val().length > 0" },
+          "status": { ".validate": "newData.isString() && (newData.val() === 'ACTIVE' || newData.val() === 'CLOSED')" },
+          "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+          "closedAt": { ".validate": "!newData.exists() || (newData.isNumber() && newData.val() <= now)" },
+          "closeReason": { ".validate": "!newData.exists() || (newData.isString() && (newData.val() === 'COMPLETED' || newData.val() === 'CANCELLED' || newData.val() === 'REASSIGNED' || newData.val() === 'EXPIRED'))" }
+        }
+      },
+      "messages": {
+        "$orderId": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('chats/meta').child($orderId).child('clientId').val() === auth.uid || root.child('chats/meta').child($orderId).child('captainId').val() === auth.uid)",
+          ".write": "auth != null && (root.child('chats/meta').child($orderId).child('clientId').val() === auth.uid || root.child('chats/meta').child($orderId).child('captainId').val() === auth.uid) && root.child('chats/meta').child($orderId).child('status').val() === 'ACTIVE'",
+          "$messageId": {
+            ".validate": "newData.hasChildren(['senderId', 'content', 'type', 'createdAt']) && newData.child('senderId').val() === auth.uid && newData.child('type').val() === 'TEXT' && newData.child('content').isString() && newData.child('content').val().length <= 2000 && newData.child('createdAt').isNumber() && newData.child('createdAt').val() <= now + 60000"
+          }
+        }
+      },
+      "images": {
+        "$orderId": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('chats/meta').child($orderId).child('clientId').val() === auth.uid || root.child('chats/meta').child($orderId).child('captainId').val() === auth.uid)",
+          ".write": "auth != null && (root.child('chats/meta').child($orderId).child('clientId').val() === auth.uid || root.child('chats/meta').child($orderId).child('captainId').val() === auth.uid) && root.child('chats/meta').child($orderId).child('status').val() === 'ACTIVE'",
+          "$imageId": {
+            ".validate": "newData.hasChildren(['imageId', 'downloadUrl', 'filePath', 'createdAt'])"
+          }
+        }
+      },
+      "user_messages": {
+        "$userId": {
+          ".read": "auth != null && auth.uid === $userId || root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+          ".write": "false",
+          "$orderId": {
+            ".read": "auth != null && auth.uid === $userId",
+            ".write": "false"
+          }
+        }
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".write": "auth != null && auth.uid === $uid",
+        "role": { ".validate": "newData.isString() && (newData.val() === 'CLIENT' || newData.val() === 'CAPTAIN' || newData.val() === 'ADMIN')" }
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
 import 'core/firebase_chat_service.dart';
+import 'core/firebase_options.dart';
 import 'core/route_payload.dart';
 import 'core/texts.dart';
 import 'screens.dart';
@@ -28,13 +29,23 @@ Future<void> bootstrap() async {
   appLanguage.value = preferences.getString('app_language') == 'en'
       ? 'en'
       : 'ar';
+
+  // Initialize Firebase with dart-define or default options
   var messagingReady = false;
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: FirebaseOptionsBuilder.build(),
+    );
     await FirebaseMessaging.instance.requestPermission();
     messagingReady = true;
-  } catch (_) {
-    messagingReady = false;
+  } catch (e) {
+    // Firebase initialization failed - app may still work for non-Firebase features
+    // Chat features will be disabled
+    if (e.toString().contains('duplicateApp')) {
+      // Firebase already initialized, ignore
+    } else {
+      messagingReady = false;
+    }
   }
   runApp(
     ProviderScope(

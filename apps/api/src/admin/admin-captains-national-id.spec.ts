@@ -3,6 +3,7 @@ import { NationalIdCryptoService } from '../captains/national-id-crypto.service'
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { ChatService } from '../firebase/chat.service';
 
 describe('AdminService captains national ID', () => {
   const originalKey = process.env.NATIONAL_ID_ENCRYPTION_KEY;
@@ -33,10 +34,12 @@ describe('AdminService captains national ID', () => {
         ]),
       },
     };
+    const chat = { getOrderChat: jest.fn() };
     const service = new AdminService(
       prisma as unknown as PrismaService,
       { create: jest.fn() } as unknown as NotificationsService,
       new OrderEventsService(prisma as unknown as PrismaService),
+      chat as any,
       crypto,
     );
 
@@ -60,10 +63,12 @@ describe('AdminService captains national ID', () => {
     const prisma = {
       captainProfile: { findUnique: jest.fn().mockResolvedValue(profile) },
     };
+    const chat = { getOrderChat: jest.fn() };
     const service = new AdminService(
       prisma as unknown as PrismaService,
       { create: jest.fn() } as unknown as NotificationsService,
       new OrderEventsService(prisma as unknown as PrismaService),
+      chat as any,
       crypto,
     );
 

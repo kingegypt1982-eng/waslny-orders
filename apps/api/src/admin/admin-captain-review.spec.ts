@@ -8,17 +8,20 @@ import { ROLES_KEY } from '../auth/auth.decorators';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { ChatService } from '../firebase/chat.service';
 
 describe('AdminService captain review', () => {
   const prisma = {
     captainProfile: { findUnique: jest.fn(), update: jest.fn() },
   };
   const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
+  const chat = { getOrderChat: jest.fn() };
   const orderEvents = new OrderEventsService({ orderEvent: { findMany: jest.fn() } } as unknown as PrismaService);
   const service = new AdminService(
     prisma as unknown as PrismaService,
     notifications as unknown as NotificationsService,
     orderEvents,
+    chat as any,
     {} as any,
   );
 

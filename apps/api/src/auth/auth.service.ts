@@ -9,6 +9,7 @@ import { GoogleLoginDto } from './dto/google-login.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SetPasswordDto } from './dto/set-password.dto';
 
 export interface GoogleProfile {
   sub: string;
@@ -201,5 +202,50 @@ export class AuthService {
       data: { usedAt: new Date() },
     });
     return { message: 'Password has been reset. Please sign in with your new password.' };
+  }
+
+  /** Whether the signed-in account already has a password. Used by the mobile
+   * profile screen to choose between "set password" and "change password". */
+  async passwordStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true },
+    });
+    if (!user) throw new UnauthorizedException('Invalid or expired session');
+    return { hasPassword: Boolean(user.passwordHash) };
+  }
+
+  /** Sets a password on a passwordless (Google-created) account, or changes an
+   * existing one after verifying the current password. The JWT guard on the
+   * controller proves ownership of the account; a verified Google token was
+   * already required to create a passwordless account. */
+  async setPassword(userId: string, input: SetPasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.suspendedAt) {
+      throw new UnauthorizedException('Invalid or expired session');
+    }
+    if (user.passwordHash) {
+      if (!input.currentPassword) {
+        throw new BadRequestException({
+          code: 'CURRENT_PASSWORD_REQUIRED',
+          message: 'Current password is required',
+        });
+      }
+      if (!(await bcrypt.compare(input.currentPassword, user.passwordHash))) {
+        throw new BadRequestException({
+          code: 'INVALID_CURRENT_PASSWORD',
+          message: 'Current password is incorrect',
+        });
+      }
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: await bcrypt.hash(input.newPassword, 12) },
+    });
+    return {
+      message: user.passwordHash
+        ? 'Password changed. Use your new password next time you sign in.'
+        : 'Password added. You can now sign in with your email and password.',
+    };
   }
 }

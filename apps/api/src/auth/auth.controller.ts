@@ -1,12 +1,15 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { CurrentUser } from './auth.decorators';
+import { JwtAuthGuard } from './jwt-auth.guard';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SetPasswordDto } from './dto/set-password.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -29,4 +32,19 @@ export class AuthController {
   @Post('forgot-password') forgotPassword(@Body() body: ForgotPasswordDto) { return this.auth.forgotPassword(body); }
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('reset-password') resetPassword(@Body() body: ResetPasswordDto) { return this.auth.resetPassword(body); }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('password-status')
+  passwordStatus(@CurrentUser() user: { id: string }) {
+    return this.auth.passwordStatus(user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('set-password')
+  setPassword(@CurrentUser() user: { id: string }, @Body() body: SetPasswordDto) {
+    return this.auth.setPassword(user.id, body);
+  }
 }

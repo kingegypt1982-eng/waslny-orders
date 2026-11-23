@@ -3,6 +3,7 @@ import { CaptainStatus, EventActor, NotificationType, OrderStatus, PolicyAcknowl
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
+import { ChatService } from '../firebase/chat.service';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { AdminOrderDto } from './dto/admin-order.dto';
@@ -21,6 +22,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly orderEvents: OrderEventsService,
+    private readonly chat: ChatService,
     private readonly crypto: NationalIdCryptoService,
   ) {}
 
@@ -308,6 +310,21 @@ export class AdminService {
     const user = await this.prisma.user.update({ where: { id: userId }, data: { suspendedAt: suspended ? new Date() : null }, select: { id: true, name: true, suspendedAt: true } }).catch(() => null);
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  /**
+   * Get chat data for an order (meta + messages) - Admin only
+   */
+  async getOrderChat(orderId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { id: true } });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const [meta, messages] = await Promise.all([
+      this.chat.getChatMeta(orderId),
+      this.chat.getChatMessages(orderId, 500),
+    ]);
+
+    return { meta, messages };
   }
 
   /**

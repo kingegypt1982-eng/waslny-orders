@@ -4,6 +4,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminService } from './admin.service';
+import { ChatService } from '../firebase/chat.service';
 
 describe('AdminService', () => {
   const tx = {
@@ -26,6 +27,7 @@ describe('AdminService', () => {
     $transaction: jest.fn(async (callback: any) => callback(tx)),
   };
   const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
+  const chat = { getOrderChat: jest.fn() };
   const orderEvents = new OrderEventsService(prisma as unknown as PrismaService);
 
   const crypto = { decrypt: jest.fn(), encrypt: jest.fn(), hash: jest.fn(), last4: jest.fn() };
@@ -33,6 +35,7 @@ describe('AdminService', () => {
     prisma as unknown as PrismaService,
     notifications as unknown as NotificationsService,
     orderEvents,
+    chat as any,
     crypto as any,
   );
 

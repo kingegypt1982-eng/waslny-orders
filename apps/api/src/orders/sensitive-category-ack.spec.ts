@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrdersService } from './orders.service';
+import { ChatService } from '../firebase/chat.service';
 
 // Reproduction: the exact payload the mobile order-review screen sends.
 const mobileElectronicsPayload = {
@@ -36,6 +37,7 @@ describe('sensitive category acknowledgement on POST /orders', () => {
   const redis = { nearbyCaptains: jest.fn() };
   const notifications = { create: jest.fn() };
   const policies = { hasAcknowledgement: jest.fn() };
+  const chat = { createChatForOrder: jest.fn(), closeChatForOrder: jest.fn(), reassignChat: jest.fn() };
   const orderEvents = new OrderEventsService(prisma as unknown as PrismaService);
   const service = new OrdersService(
     prisma as unknown as PrismaService,
@@ -43,6 +45,7 @@ describe('sensitive category acknowledgement on POST /orders', () => {
     notifications as unknown as NotificationsService,
     orderEvents,
     policies as any,
+    chat as any,
   );
 
   const pipe = new ValidationPipe({

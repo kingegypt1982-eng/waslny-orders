@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api_client.dart';
 import '../core/texts.dart';
+import 'set_password.dart';
 
 const _pBg = Color(0xFF03151D);
 const _pCard = Color(0xFF092630);
@@ -219,6 +220,16 @@ class ProfileScreen extends ConsumerWidget {
                     : phone,
                 onTap: () =>
                     _editProfile(context, ref, name: name, phone: phone),
+              ),
+              const SizedBox(height: 10),
+              _PTile(
+                icon: Icons.lock_outline_rounded,
+                title: tr(ar: 'كلمة المرور', en: 'Password'),
+                subtitle: tr(
+                  ar: 'إضافة كلمة مرور أو تغييرها',
+                  en: 'Add or change your password',
+                ),
+                onTap: () => showSetPasswordDialog(context),
               ),
               const SizedBox(height: 10),
               _PTile(

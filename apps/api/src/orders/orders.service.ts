@@ -7,6 +7,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OrderEventsService } from '../order-events/order-events.service';
 import { PoliciesService } from '../policies/policies.service';
 import { POLICY_VERSION } from '../policies/policy-content.v1';
+import { ChatService } from '../firebase/chat.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
 import { RespondInvoiceDto } from './dto/respond-invoice.dto';
@@ -44,6 +45,7 @@ export class OrdersService {
     private readonly notifications: NotificationsService,
     private readonly orderEvents: OrderEventsService,
     private readonly policies: PoliciesService,
+    private readonly chat: ChatService,
   ) {}
 
   /** Best-effort notification: never breaks the order flow. */
@@ -485,6 +487,8 @@ export class OrdersService {
         orderId: order.id,
         screen: 'ORDER_ACCEPTED',
       });
+      // Create chat room for this order
+      await this.chat.createChatForOrder(order.id);
     }
     return order;
   }
@@ -744,6 +748,8 @@ export class OrdersService {
         NotificationType.ORDER,
         { orderId: order.id },
       );
+      // Close chat room
+      await this.chat.closeChatForOrder(order.id, 'COMPLETED');
     }
     return order;
   }
@@ -796,6 +802,8 @@ export class OrdersService {
         NotificationType.ORDER,
         { orderId: order.id },
       );
+      // Close chat room
+      await this.chat.closeChatForOrder(order.id, 'CANCELLED');
     }
     return order;
   }
@@ -804,6 +812,7 @@ export class OrdersService {
    * Captain release rules: the assigned captain may return an order to the
    * pool before pickup (ACCEPTED/ARRIVED_AT_PICKUP). The order goes back to
    * SEARCHING_CAPTAIN and the reserved commission is refunded.
+   * Chat is closed with REASSIGNED reason.
    */
   async release(orderId: string, captainId: string) {
     const order = await this.prisma.$transaction(async (tx) => {
@@ -831,6 +840,8 @@ export class OrdersService {
     });
     if (order) {
       await this.notifyClient(order, 'جارٍ البحث عن مندوب جديد', `اعتذر المندوب عن الطلب ${order.reference}. نبحث لك عن مندوب آخر.`);
+      // Close chat room with REASSIGNED reason
+      await this.chat.closeChatForOrder(order.id, 'REASSIGNED');
     }
     return order;
   }

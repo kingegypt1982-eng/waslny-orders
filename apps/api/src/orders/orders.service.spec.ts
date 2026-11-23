@@ -6,6 +6,7 @@ import { OrderEventsService } from '../order-events/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.module';
 import { OrdersService } from './orders.service';
+import { ChatService } from '../firebase/chat.service';
 import * as proofUpload from './proof-upload';
 
 describe('OrdersService wallet rules', () => {
@@ -36,6 +37,7 @@ describe('OrdersService wallet rules', () => {
   const redis = { nearbyCaptains: jest.fn(), updateCaptainLocation: jest.fn() };
   const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
   const policies = { hasAcknowledgement: jest.fn().mockResolvedValue({ id: 'ack1' }) };
+  const chat = { createChatForOrder: jest.fn(), closeChatForOrder: jest.fn(), reassignChat: jest.fn() };
   const orderEvents = new OrderEventsService(prisma as unknown as PrismaService);
 
   const service = new OrdersService(
@@ -44,6 +46,7 @@ describe('OrdersService wallet rules', () => {
     notifications as unknown as NotificationsService,
     orderEvents,
     policies as any,
+    chat as any,
   );
 
   beforeEach(() => {

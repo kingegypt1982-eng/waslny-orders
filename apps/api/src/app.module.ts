@@ -14,13 +14,14 @@ import { AdminModule } from './admin/admin.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TopupsModule } from './topups/topups.module';
 import { PoliciesModule } from './policies/policies.module';
+import { FirebaseModule } from './firebase/firebase.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 100 }]),
-    PrismaModule, RedisModule, AuthModule, OrdersModule, CaptainsModule, AdminModule, NotificationsModule, TopupsModule, PoliciesModule,
+    PrismaModule, RedisModule, AuthModule, OrdersModule, CaptainsModule, AdminModule, NotificationsModule, TopupsModule, PoliciesModule, FirebaseModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

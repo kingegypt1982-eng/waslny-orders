@@ -40,6 +40,7 @@ export class AdminController {
       disposition: `inline; filename="${basename(file.path)}"`,
     });
   }
+  @Get('orders/:id/chat') orderChat(@Param('id') id: string) { return this.admin.getOrderChat(id); }
   @Get('acknowledgements') acknowledgements(@Query() query: AdminAcknowledgementsQueryDto) { return this.admin.acknowledgements(query); }
   @Patch('orders/:id') updateOrder(@Param('id') id: string, @Body() body: AdminOrderDto, @CurrentUser() user: { id: string }) {
     return this.admin.updateOrder(id, body, user.id);

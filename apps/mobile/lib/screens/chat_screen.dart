@@ -74,8 +74,6 @@ class _ChatScreenState extends State<ChatScreen> {
       final file = File(pickedFile.path);
       await _chatService.sendMessage(
         content: '',
-        receiverId: widget.counterpartId,
-        role: widget.counterpartRole,
         orderId: widget.orderId,
         type: MessageType.image,
         imageFile: file,
@@ -93,8 +91,6 @@ class _ChatScreenState extends State<ChatScreen> {
     } else {
       _chatService.sendMessage(
         content: content,
-        receiverId: widget.counterpartId,
-        role: widget.counterpartRole,
         orderId: widget.orderId,
         type: MessageType.text,
       );
