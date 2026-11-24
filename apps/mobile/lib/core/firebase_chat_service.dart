@@ -78,7 +78,7 @@ class FirebaseChatService {
     final user = _auth.currentUser;
     if (user == null) return '';
     final result = await user.getIdTokenResult();
-    return result.claims['role']?.toString() ?? '';
+    return result.claims?['role']?.toString() ?? '';
   }
 
   Future<Map<String, dynamic>?> getOrderChatMeta(String orderId) async {

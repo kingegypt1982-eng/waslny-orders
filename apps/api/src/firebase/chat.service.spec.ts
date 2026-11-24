@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatService } from './chat.service';
 import { OrderStatus } from '@prisma/client';
-import { App } from 'firebase-admin/app';
+import { Database } from 'firebase-admin/database';
+import { FirebaseService } from './firebase.service';
 
 const mockPrisma = {
   order: {
@@ -21,7 +22,6 @@ jest.mock('firebase-admin/app', () => ({
   initializeApp: jest.fn(),
   cert: jest.fn(),
   getApp: jest.fn(),
-  App: jest.fn(),
 }));
 
 jest.mock('firebase-admin/database', () => ({
@@ -44,6 +44,7 @@ mockDatabase = {
 describe('ChatService', () => {
   let service: ChatService;
   let prismaService: PrismaService;
+  let mockFirebaseService: Partial<FirebaseService>;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -51,6 +52,7 @@ describe('ChatService', () => {
     mockConfig.get.mockImplementation((key: string) => {
       if (key === 'CHAT_CLEANUP_DAYS') return 7;
       if (key === 'FIREBASE_DATABASE_URL') return 'https://test.firebaseio.com';
+      if (key === 'CHAT_ENABLED') return true;
       return undefined;
     });
 
@@ -64,24 +66,23 @@ describe('ChatService', () => {
     mockDatabase.endAt.mockReturnValue(mockDatabase);
     mockDatabase.limitToLast.mockReturnValue(mockDatabase);
 
+    mockFirebaseService = {
+      getDatabase: jest.fn().mockReturnValue(mockDatabase),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChatService,
         { provide: ConfigService, useValue: mockConfig },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: FirebaseService, useValue: mockFirebaseService },
       ],
     }).compile();
 
     service = module.get<ChatService>(ChatService);
     prismaService = module.get<PrismaService>(PrismaService);
-
-    // Set up getDatabase mock
-    const { getDatabase } = require('firebase-admin/database');
-    (getDatabase as jest.Mock).mockReturnValue(mockDatabase);
-
-    // Set the mock database using a mock App
-    const mockApp = {} as App;
-    service.setDatabase(mockApp);
+    // Initialize the database by calling onModuleInit
+    await service.onModuleInit();
   });
 
   describe('createChatForOrder', () => {

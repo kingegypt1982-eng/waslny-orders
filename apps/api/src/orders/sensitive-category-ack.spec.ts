@@ -85,9 +85,6 @@ describe('sensitive category acknowledgement on POST /orders', () => {
     const error = await service
       .create('client1', { ...mobileElectronicsPayload } as any)
       .catch((e) => e);
-    // Show the exact API error text for the report.
-    // eslint-disable-next-line no-console
-    console.log(`REPRO_ERROR status=${error?.status} body=${JSON.stringify(error?.response)}`);
 
     expect(error?.status).toBe(403);
     expect(error?.response).toMatchObject({
