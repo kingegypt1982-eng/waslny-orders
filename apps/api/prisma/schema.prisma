@@ -121,7 +121,7 @@ model User {
   policyAcknowledgements PolicyAcknowledgement[]
   capturedInvoices       PurchaseInvoice[]       @relation("CapturedInvoices")
   passwordResetTokens    PasswordResetToken[]
-  skippedOrders          OrderSkip[]             @relation("SkippedOrders")
+  skippedOrders          OrderSkip[]             @relation("CaptainOrderSkips")
   sentMessages           ChatMessage[]           @relation("Sender")
   receivedMessages       ChatMessage[]           @relation("Receiver")
 }
@@ -273,7 +273,7 @@ model Order {
   payments               PaymentIntent[]
   events                 OrderEvent[]
   proofs                 OrderProof[]
-  skips                  OrderSkip[]    @relation("SkippedOrders")
+  skips                  OrderSkip[]    @relation("OrderSkips")
   policyAcknowledgements PolicyAcknowledgement[]
   purchaseInvoice        PurchaseInvoice?
   ratings                OrderRating[]
@@ -303,8 +303,8 @@ model OrderSkip {
   orderId   String
   captainId String
   createdAt DateTime @default(now())
-  order     Order    @relation("SkippedOrders", fields: [orderId], references: [id], onDelete: Cascade)
-  captain   User     @relation("SkippedOrders", fields: [captainId], references: [id], onDelete: Cascade)
+  order     Order    @relation("OrderSkips", fields: [orderId], references: [id], onDelete: Cascade)
+  captain   User     @relation("CaptainOrderSkips", fields: [captainId], references: [id], onDelete: Cascade)
 
   @@unique([orderId, captainId])
   @@index([captainId, createdAt])
