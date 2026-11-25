@@ -35,14 +35,13 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
   app.use(helmet());
   // CORS_ORIGINS takes precedence; CLIENT_ORIGIN is kept as a fallback.
-  // Production never falls back to '*': it fails closed instead.
-  const origins = parseOrigins(process.env.CORS_ORIGINS).length
-    ? parseOrigins(process.env.CORS_ORIGINS)
+  // An unset value must not break startup: CORS headers are simply disabled
+  // instead of falling back to a wildcard origin.
+  const configuredOrigins = parseOrigins(process.env.CORS_ORIGINS);
+  const origins = configuredOrigins.length
+    ? configuredOrigins
     : parseOrigins(process.env.CLIENT_ORIGIN);
-  if (!origins.length && isProduction) {
-    throw new Error('CORS_ORIGINS is not set. Refusing to boot production with open CORS.');
-  }
-  app.enableCors({ origin: origins.length ? origins : true });
+  app.enableCors({ origin: origins.length ? origins : false });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   app.useGlobalFilters(new AllExceptionsFilter());
   const swagger = new DocumentBuilder()
