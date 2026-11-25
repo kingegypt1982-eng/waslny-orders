@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api_client.dart';
+import '../core/fcm_service.dart';
 import '../core/texts.dart';
 import 'set_password.dart';
 
@@ -51,6 +52,11 @@ class ProfileScreen extends ConsumerWidget {
       ),
     );
     if (confirmed != true || !context.mounted) return;
+    // Clear the device token while the JWT is still valid, before the session
+    // is dropped by clearSession(). The endpoint is captain-only.
+    if (ref.read(sessionProvider)?['role']?.toString() == 'CAPTAIN') {
+      await ref.read(fcmServiceProvider).clearTokenOnLogout();
+    }
     await ref.read(apiClientProvider).clearSession();
     ref.read(sessionProvider.notifier).state = null;
     if (context.mounted) context.go('/auth');

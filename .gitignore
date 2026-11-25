@@ -26,3 +26,5 @@ apps/mobile/.metadata
 .DS_Store
 backups/
 .vscode/
+
+config/firebase-service-account.json

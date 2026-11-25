@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
 import 'core/chat_config.dart';
+import 'core/fcm_service.dart';
 import 'core/firebase_bootstrap.dart';
 import 'core/route_payload.dart';
 import 'core/texts.dart';
@@ -22,6 +24,8 @@ import 'screens/register_screen.dart';
 import 'screens/route_fallback_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
+
+final _fcmMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 void bootstrap() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +59,8 @@ void bootstrap() {
           unawaited(initializeChatFirebase());
         });
       }
+
+
     },
     (_, __) => _showFatalScreen(),
   );
@@ -241,8 +247,17 @@ class WasalnyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
-    ref.listen(sessionProvider, (_, _) {
+    ref.listen(sessionProvider, (previous, next) {
       ref.read(authRevisionProvider).bump();
+      if (!kFcmEnabled) return;
+      final fcm = ref.read(fcmServiceProvider);
+      if (previous == null && next != null &&
+          next['role']?.toString() == 'CAPTAIN') {
+        // NestJS login just completed: register this device's FCM token.
+        unawaited(fcm.initialize().then((_) => fcm.registerTokenOnLogin()));
+      } else if (previous != null && next == null) {
+        unawaited(fcm.clearTokenOnLogout());
+      }
     });
     ref.listen(unauthorizedProvider, (_, _) {
       ref.read(sessionProvider.notifier).state = null;
@@ -250,47 +265,94 @@ class WasalnyApp extends ConsumerWidget {
         router.go('/auth');
       }
     });
-    return ValueListenableBuilder<String>(
-      valueListenable: appLanguage,
-      builder: (context, language, _) => MaterialApp.router(
-        title: 'Wasalny Orders',
-        debugShowCheckedModeBanner: false,
-        builder: (context, child) => Directionality(
-          textDirection: language == 'ar'
-              ? TextDirection.rtl
-              : TextDirection.ltr,
-          child: child ?? const SizedBox.shrink(),
+
+    // Handle FCM notification navigation - must be inside build but after router is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!kFcmEnabled) return;
+
+      final fcmService = ref.read(fcmServiceProvider);
+      final session = ref.read(sessionProvider);
+      unawaited(fcmService.initialize().then((_) async {
+        if (session != null && session['role']?.toString() == 'CAPTAIN') {
+          await fcmService.registerTokenOnLogin();
+        }
+      }));
+
+      final navData = fcmService.consumePendingNavigation();
+      if (navData == null) return;
+
+      // Check if we have a logged-in captain
+      if (session == null) return;
+
+      final orderId = navData['orderId'] as String?;
+      if (orderId == null) return;
+
+      // Navigate to the order trip screen
+      router.go('/captain/trip/$orderId');
+    });
+
+    // firebase_messaging does not raise a system notification while the app is
+    // in the foreground, so surface the message as an in-app banner.
+    return ValueListenableBuilder<RemoteMessage?>(
+      valueListenable: ref.read(fcmServiceProvider).foregroundMessage,
+      builder: (context, message, child) {
+        if (kFcmEnabled && message != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final title = message.notification?.title ?? 'طلب جديد';
+            final body = message.notification?.body ?? '';
+            _fcmMessengerKey.currentState?.showSnackBar(
+              SnackBar(
+                content: Text('$title\n$body'),
+                duration: const Duration(seconds: 6),
+              ),
+            );
+          });
+        }
+        return child!;
+      },
+      child: ValueListenableBuilder<String>(
+        valueListenable: appLanguage,
+        builder: (context, language, _) => MaterialApp.router(
+          title: 'Wasalny Orders',
+          debugShowCheckedModeBanner: false,
+          scaffoldMessengerKey: _fcmMessengerKey,
+          builder: (context, child) => Directionality(
+            textDirection: language == 'ar'
+                ? TextDirection.rtl
+                : TextDirection.ltr,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF19785F),
+              surface: const Color(0xFFF7F8F5),
+            ),
+            scaffoldBackgroundColor: const Color(0xFFF7F8F5),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Color(0xFFF7F8F5),
+              foregroundColor: Color(0xFF22342B),
+              elevation: 0,
+            ),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(9),
+                borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(9),
+                borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 13,
+              ),
+            ),
+          ),
+          routerConfig: router,
         ),
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF19785F),
-            surface: const Color(0xFFF7F8F5),
-          ),
-          scaffoldBackgroundColor: const Color(0xFFF7F8F5),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFFF7F8F5),
-            foregroundColor: Color(0xFF22342B),
-            elevation: 0,
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(9),
-              borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(9),
-              borderSide: const BorderSide(color: Color(0xFFE6EBE6)),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 13,
-            ),
-          ),
-        ),
-        routerConfig: router,
       ),
     );
   }

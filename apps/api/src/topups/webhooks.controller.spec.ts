@@ -4,6 +4,10 @@ import * as request from 'supertest';
 import { TopUpsService } from './topups.service';
 import { WebhooksController } from './webhooks.controller';
 
+// Nest application bootstrap is slow under the full parallel suite on this
+// machine; give this HTTP contract suite enough time instead of disabling it.
+jest.setTimeout(30000);
+
 describe('WebhooksController (Kashier HTTP contract)', () => {
   let app: INestApplication;
   const handleWebhook = jest.fn();

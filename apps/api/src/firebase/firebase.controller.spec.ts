@@ -69,9 +69,8 @@ describe('FirebaseController', () => {
       const result = await controller.createCustomToken(mockReq as any);
 
       expect(result).toEqual({ customToken: 'custom-token-123' });
-      expect(mockFirebaseService.createCustomToken).toHaveBeenCalledWith('waslny-user-1', {
+      expect(mockFirebaseService.createCustomToken).toHaveBeenCalledWith('user-1', {
         role: 'CLIENT',
-        waslny_user_id: 'user-1',
       });
     });
   });

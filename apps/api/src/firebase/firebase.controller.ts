@@ -6,7 +6,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ConfigService } from '@nestjs/config';
 
 @ApiTags('Firebase')
-@Controller('api/v1/firebase')
+@Controller('firebase')
 @UseGuards(ThrottlerGuard)
 export class FirebaseController {
   constructor(
@@ -34,11 +34,8 @@ export class FirebaseController {
       return { error: 'Firebase is not configured on the server', code: 'FIREBASE_NOT_CONFIGURED' };
     }
 
-    const uid = `waslny-${req.user.sub}`;
-    const claims = {
-      role: req.user.role,
-      waslny_user_id: req.user.sub,
-    };
+    const uid = req.user.sub;
+    const claims = { role: req.user.role };
 
     try {
       const customToken = await this.firebase.createCustomToken(uid, claims);

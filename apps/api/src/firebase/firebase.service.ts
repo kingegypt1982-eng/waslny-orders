@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { initializeApp, cert, getApp, App } from 'firebase-admin/app';
 import { getAuth, Auth } from 'firebase-admin/auth';
 import { getDatabase, Database } from 'firebase-admin/database';
+import { getMessaging, Messaging } from 'firebase-admin/messaging';
 
 @Injectable()
 export class FirebaseService implements OnModuleInit {
@@ -16,6 +17,7 @@ export class FirebaseService implements OnModuleInit {
   }
 
   private initialize() {
+    if (!this.config.get<boolean>('CHAT_ENABLED')) return;
     const serviceAccountPath = this.config.get<string>('FIREBASE_SERVICE_ACCOUNT_PATH');
 
     if (!serviceAccountPath) {
@@ -45,6 +47,11 @@ export class FirebaseService implements OnModuleInit {
     return getDatabase(this.app);
   }
 
+  getMessaging(): Messaging | null {
+    if (!this.app) return null;
+    return getMessaging(this.app);
+  }
+
   async createCustomToken(uid: string, claims?: Record<string, unknown>): Promise<string> {
     if (!this.app) {
       throw new Error('Firebase Admin SDK not initialized');
@@ -61,5 +68,39 @@ export class FirebaseService implements OnModuleInit {
 
   isInitialized(): boolean {
     return this.app !== null;
+  }
+
+  async sendNotification(
+    token: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<void> {
+    if (!this.app) {
+      throw new Error('Firebase Admin SDK not initialized');
+    }
+    const messaging = getMessaging(this.app);
+    await messaging.send({
+      token,
+      notification: { title, body },
+      data,
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'trip_alerts',
+          priority: 'max',
+          defaultSound: false,
+          sound: 'trip_alert_sound',
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'trip_alert_sound.wav',
+            'content-available': 1,
+          },
+        },
+      },
+    });
   }
 }

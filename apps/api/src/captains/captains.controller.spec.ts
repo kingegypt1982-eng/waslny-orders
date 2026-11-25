@@ -21,6 +21,13 @@ describe('CaptainsController profile', () => {
     wallet: { findUnique: jest.fn() },
   };
   const redis = { updateCaptainLocation: jest.fn() };
+  const fcm = {
+    sendTripAlert: jest.fn().mockResolvedValue(true),
+    notifyEligibleCaptains: jest.fn().mockResolvedValue(0),
+    cancelTripAlert: jest.fn().mockResolvedValue(undefined),
+    registerFcmToken: jest.fn().mockResolvedValue(undefined),
+    clearFcmToken: jest.fn().mockResolvedValue(undefined),
+  };
   const originalKey = process.env.NATIONAL_ID_ENCRYPTION_KEY;
   let crypto: NationalIdCryptoService;
   let controller: CaptainsController;
@@ -32,6 +39,7 @@ describe('CaptainsController profile', () => {
       prisma as unknown as PrismaService,
       redis as unknown as RedisService,
       crypto,
+      fcm as any,
     );
   });
 

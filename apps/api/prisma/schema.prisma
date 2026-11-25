@@ -156,6 +156,7 @@ model CaptainProfile {
   lastLat                   Float?
   lastLng                   Float?
   lastSeenAt                DateTime?
+  fcmToken                  String?
   approvedAt                DateTime?
   reviewedAt                DateTime?
   rejectionReason           String?
@@ -272,7 +273,7 @@ model Order {
   payments               PaymentIntent[]
   events                 OrderEvent[]
   proofs                 OrderProof[]
-  skips                  OrderSkip[]
+  skips                  OrderSkip[]    @relation("SkippedOrders")
   policyAcknowledgements PolicyAcknowledgement[]
   purchaseInvoice        PurchaseInvoice?
   ratings                OrderRating[]

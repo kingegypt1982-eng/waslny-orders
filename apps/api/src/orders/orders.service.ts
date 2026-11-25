@@ -8,6 +8,7 @@ import { OrderEventsService } from '../order-events/order-events.service';
 import { PoliciesService } from '../policies/policies.service';
 import { POLICY_VERSION } from '../policies/policy-content.v1';
 import { ChatService } from '../firebase/chat.service';
+import { FcmService } from '../firebase/fcm.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { SubmitInvoiceDto } from './dto/submit-invoice.dto';
 import { RespondInvoiceDto } from './dto/respond-invoice.dto';
@@ -39,6 +40,8 @@ export const ACTIVE_TRIP_STATUSES: OrderStatus[] = [
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -46,6 +49,7 @@ export class OrdersService {
     private readonly orderEvents: OrderEventsService,
     private readonly policies: PoliciesService,
     private readonly chat: ChatService,
+    private readonly fcm: FcmService,
   ) {}
 
   /** Best-effort notification: never breaks the order flow. */
@@ -141,7 +145,30 @@ export class OrdersService {
       orderId: order.id,
       screen: 'ORDER_CREATED',
     });
+    // Notify eligible captains via FCM (async, non-blocking)
+    this.notifyCaptainsForNewOrder({
+      id: order.id,
+      reference: order.reference,
+      pickupLabel: order.pickupLabel,
+      deliveryLabel: order.deliveryLabel,
+      category: order.category,
+      price: Number(order.price),
+      distanceKm: Number(order.distanceKm),
+      pickupLatitude: order.pickupLatitude,
+      pickupLongitude: order.pickupLongitude,
+    });
     return order;
+  }
+
+  /**
+   * After order creation, notify eligible captains via FCM (non-blocking).
+   * Runs asynchronously to not delay the client response.
+   */
+  private notifyCaptainsForNewOrder(order: { id: string; reference: string; pickupLabel: string; deliveryLabel: string; category: ShipmentCategory; price: number; distanceKm: number; pickupLatitude: number; pickupLongitude: number }) {
+    // Fire and forget - don't await to avoid delaying the response
+    this.fcm.notifyEligibleCaptains(order.id).catch((error) => {
+      this.logger.error(`Failed to notify captains for order ${order.id}:`, error);
+    });
   }
 
   listForUser(user: { id: string; role: UserRole }) {
@@ -481,6 +508,12 @@ export class OrdersService {
       });
       return updated;
     });
+    // If another captain already won, send them a cancel alert
+    if (order?.captainId && order.captainId !== captainId) {
+      await this.fcm.cancelTripAlert(order.id).catch(() => {
+        // Best-effort notification; don't break the flow
+      });
+    }
     if (order) {
       await this.notifyClient(order, 'تم قبول طلبك', `قبل المندوب الطلب ${order.reference} وهو في الطريق إلى موقع الاستلام.`);
       await this.notify(captainId, 'تم قبول الطلب', `قبلت الطلب ${order.reference}. ابدأ التنقل إلى موقع الاستلام.`, NotificationType.ORDER, {
@@ -794,6 +827,12 @@ export class OrdersService {
       }
       throw new UnprocessableEntityException('This order can no longer be cancelled');
     });
+    // Send FCM cancel alert to stop any ongoing notifications
+    if (order?.captainId) {
+      await this.fcm.cancelTripAlert(order.id).catch(() => {
+        // Best-effort; don't break the flow
+      });
+    }
     if (order?.captainId) {
       await this.notify(
         order.captainId,

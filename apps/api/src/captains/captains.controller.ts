@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, NotFoundExc
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { IsBoolean, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { randomUUID } from 'crypto';
 import { existsSync, createReadStream } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
@@ -20,6 +20,7 @@ import { validateEgyptianNationalId } from './national-id.util';
 import { CaptainProfileUpdateDto } from './captain-profile.dto';
 import { DEFAULT_MAX_RADIUS_KM, DEFAULT_MIN_RADIUS_KM } from '../orders/orders.constants';
 import { toPosixPath } from '../orders/proof-upload';
+import { FcmService } from '../firebase/fcm.service';
 
 class LocationDto {
   @IsNumber() @Min(-90) @Max(90) latitude: number;
@@ -29,6 +30,10 @@ class LocationDto {
 class AvailabilityDto {
   @IsBoolean() isOnline: boolean;
   @IsOptional() @IsNumber() @Min(1) @Max(100) serviceRadiusKm?: number;
+}
+
+class FcmTokenDto {
+  @IsString() token: string;
 }
 
 @ApiTags('Captains')
@@ -43,6 +48,7 @@ export class CaptainsController {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly crypto: NationalIdCryptoService,
+    private readonly fcm: FcmService,
   ) {}
 
   @Get('me') async profile(@CurrentUser() user: { id: string }) {
@@ -276,6 +282,28 @@ export class CaptainsController {
       data,
       select: { isOnline: true, serviceRadiusKm: true },
     });
+  }
+
+  /**
+   * Register the captain's FCM token for push notifications.
+   * Called when the app starts or token refreshes.
+   */
+  @Post('me/fcm-token')
+  async registerFcmToken(@CurrentUser() user: { id: string }, @Body() body: FcmTokenDto) {
+    if (!body.token?.trim()) {
+      throw new BadRequestException('FCM token is required');
+    }
+    await this.fcm.registerFcmToken(user.id, body.token.trim());
+    return { registered: true };
+  }
+
+  /**
+   * Clear the captain's FCM token (e.g., on logout).
+   */
+  @Post('me/fcm-token/clear')
+  async clearFcmToken(@CurrentUser() user: { id: string }) {
+    await this.fcm.clearFcmToken(user.id);
+    return { cleared: true };
   }
 
   @Get('wallet') async wallet(@CurrentUser() user: { id: string }) {

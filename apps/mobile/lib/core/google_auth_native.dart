@@ -13,10 +13,18 @@ import 'google_auth_types.dart';
 /// Throws [GoogleAuthCancelled] when the user dismisses the account picker.
 Future<String> requestGoogleIdToken({String? serverClientId}) async {
   try {
-    final account = await GoogleSignIn(
-      scopes: const ['email', 'profile'],
-      serverClientId: serverClientId,
-    ).signIn();
+      // Ensure a server client ID (Web OAuth client) is provided and usable; otherwise GoogleSignIn cannot return an ID token.
+      if (serverClientId == null || isUnusableGoogleClientId(serverClientId)) {
+        throw const GoogleAuthException(
+          GoogleAuthErrorKind.notConfigured,
+          'Google client ID not configured',
+        );
+      }
+      final trimmedId = serverClientId.trim();
+      final account = await GoogleSignIn(
+        scopes: const ['email', 'profile'],
+        serverClientId: trimmedId,
+      ).signIn();
     if (account == null) throw const GoogleAuthCancelled();
     final auth = await account.authentication;
     final idToken = auth.idToken;

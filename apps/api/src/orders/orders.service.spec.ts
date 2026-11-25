@@ -38,6 +38,13 @@ describe('OrdersService wallet rules', () => {
   const notifications = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
   const policies = { hasAcknowledgement: jest.fn().mockResolvedValue({ id: 'ack1' }) };
   const chat = { createChatForOrder: jest.fn(), closeChatForOrder: jest.fn(), reassignChat: jest.fn() };
+  const fcm = {
+    sendTripAlert: jest.fn().mockResolvedValue(true),
+    notifyEligibleCaptains: jest.fn().mockResolvedValue(0),
+    cancelTripAlert: jest.fn().mockResolvedValue(undefined),
+    registerFcmToken: jest.fn().mockResolvedValue(undefined),
+    clearFcmToken: jest.fn().mockResolvedValue(undefined),
+  };
   const orderEvents = new OrderEventsService(prisma as unknown as PrismaService);
 
   const service = new OrdersService(
@@ -47,6 +54,7 @@ describe('OrdersService wallet rules', () => {
     orderEvents,
     policies as any,
     chat as any,
+    fcm as any,
   );
 
   beforeEach(() => {
@@ -383,6 +391,62 @@ describe('OrdersService wallet rules', () => {
         actorId: 'client1', actorRole: 'CLIENT',
       }),
     });
+  });
+
+  const newOrderPayload = {
+    pickupLabel: 'A', pickupLatitude: 30, pickupLongitude: 31,
+    deliveryLabel: 'B', deliveryLatitude: 30.1, deliveryLongitude: 31.1,
+    category: 'PACKAGE' as any, description: 'Box', recipientName: 'R', recipientPhone: '+201000000000',
+  };
+
+  const mockCreatedOrder = () => {
+    tx.order.create.mockImplementation(async ({ data }: any) => ({
+      id: 'o9', reference: 'WS-9', status: 'SEARCHING_CAPTAIN',
+      pickupLabel: data.pickupLabel, deliveryLabel: data.deliveryLabel,
+      category: data.category, price: 100, distanceKm: 5,
+      pickupLatitude: data.pickupLatitude, pickupLongitude: data.pickupLongitude,
+    }));
+  };
+
+  it('notifies eligible captains only after the new order is committed', async () => {
+    mockCreatedOrder();
+    let transactionDone = false;
+    let doneAtNotify: boolean | null = null;
+    prisma.$transaction.mockImplementationOnce(async (callback: any) => {
+      const result = await callback(tx);
+      transactionDone = true;
+      return result;
+    });
+    fcm.notifyEligibleCaptains.mockImplementationOnce(async () => {
+      doneAtNotify = transactionDone;
+      return 0;
+    });
+
+    const order = await service.create('client1', newOrderPayload);
+
+    expect(order.id).toBe('o9');
+    expect(fcm.notifyEligibleCaptains).toHaveBeenCalledWith('o9');
+    expect(doneAtNotify).toBe(true);
+  });
+
+  it('does not fail or change the order when FCM notification rejects', async () => {
+    mockCreatedOrder();
+    fcm.notifyEligibleCaptains.mockRejectedValueOnce(new Error('fcm unavailable'));
+
+    const order = await service.create('client1', newOrderPayload);
+
+    expect(order.status).toBe('SEARCHING_CAPTAIN');
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(tx.order.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('sends a cancel alert when a client cancels an assigned order', async () => {
+    tx.order.findUnique.mockResolvedValue({ ...acceptedOrder });
+    tx.order.update.mockResolvedValue({ ...acceptedOrder, status: 'CANCELLED' });
+
+    await service.cancel('o1', 'client1');
+
+    expect(fcm.cancelTripAlert).toHaveBeenCalledWith('o1');
   });
 
   it('rejects order creation when the client phone is missing', async () => {

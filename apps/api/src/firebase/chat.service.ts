@@ -130,6 +130,7 @@ export class ChatService implements OnModuleInit {
    * Reassign a chat to a new captain (when captain releases and new one accepts)
    */
   async reassignChat(orderId: string, newCaptainId: string): Promise<void> {
+    if (!this.enabled) return;
     const metaRef = this.getMetaRef(orderId);
     const snapshot = await metaRef.once('value');
 
@@ -161,6 +162,7 @@ export class ChatService implements OnModuleInit {
    * Get chat metadata for an order (used by admin endpoint)
    */
   async getChatMeta(orderId: string): Promise<ChatMeta | null> {
+    if (!this.enabled) return null;
     const snapshot = await this.getMetaRef(orderId).once('value');
     if (!snapshot.exists()) return null;
     return snapshot.val() as ChatMeta;
@@ -170,6 +172,7 @@ export class ChatService implements OnModuleInit {
    * Get messages for an order (used by admin endpoint)
    */
   async getChatMessages(orderId: string, limit: number = 100): Promise<Array<{ senderId: string; content: string; type: string; createdAt: number }>> {
+    if (!this.enabled) return [];
     const snapshot = await this.getMessagesRef(orderId)
       .orderByChild('createdAt')
       .limitToLast(limit)
@@ -195,8 +198,7 @@ export class ChatService implements OnModuleInit {
    * Runs daily at 3 AM
    */
   async cleanupOldChats(): Promise<{ checked: number; deleted: number }> {
-    if (!this.database) {
-      this.logger.warn('Firebase Database not initialized, skipping cleanup');
+    if (!this.enabled || !this.database) {
       return { checked: 0, deleted: 0 };
     }
 

@@ -38,6 +38,13 @@ describe('Order flow phase 2 guards, location and rating', () => {
   const redis: any = { updateCaptainLocation: jest.fn().mockResolvedValue(true), nearbyCaptains: jest.fn() };
   const notifications: any = { create: jest.fn().mockResolvedValue({ id: 'n1' }) };
   const chat = { createChatForOrder: jest.fn(), closeChatForOrder: jest.fn(), reassignChat: jest.fn() };
+  const fcm = {
+    sendTripAlert: jest.fn().mockResolvedValue(true),
+    notifyEligibleCaptains: jest.fn().mockResolvedValue(0),
+    cancelTripAlert: jest.fn().mockResolvedValue(undefined),
+    registerFcmToken: jest.fn().mockResolvedValue(undefined),
+    clearFcmToken: jest.fn().mockResolvedValue(undefined),
+  };
   const orderEvents = new OrderEventsService(prisma as PrismaService);
   const policies: any = { hasAcknowledgement: jest.fn().mockResolvedValue({ id: 'ack1' }) };
   const service = new OrdersService(
@@ -47,6 +54,7 @@ describe('Order flow phase 2 guards, location and rating', () => {
     orderEvents,
     policies,
     chat as any,
+    fcm as any,
   );
 
   beforeEach(() => {
