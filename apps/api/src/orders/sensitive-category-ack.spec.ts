@@ -38,6 +38,13 @@ describe('sensitive category acknowledgement on POST /orders', () => {
   const notifications = { create: jest.fn() };
   const policies = { hasAcknowledgement: jest.fn() };
   const chat = { createChatForOrder: jest.fn(), closeChatForOrder: jest.fn(), reassignChat: jest.fn() };
+  const fcm = {
+    sendTripAlert: jest.fn().mockResolvedValue(true),
+    notifyEligibleCaptains: jest.fn().mockResolvedValue(0),
+    cancelTripAlert: jest.fn().mockResolvedValue(undefined),
+    registerFcmToken: jest.fn().mockResolvedValue(undefined),
+    clearFcmToken: jest.fn().mockResolvedValue(undefined),
+  };
   const orderEvents = new OrderEventsService(prisma as unknown as PrismaService);
   const service = new OrdersService(
     prisma as unknown as PrismaService,
@@ -46,6 +53,7 @@ describe('sensitive category acknowledgement on POST /orders', () => {
     orderEvents,
     policies as any,
     chat as any,
+    fcm as any,
   );
 
   const pipe = new ValidationPipe({
