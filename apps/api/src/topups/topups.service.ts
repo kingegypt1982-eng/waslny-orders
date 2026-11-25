@@ -206,7 +206,7 @@ export class TopUpsService {
       throw new ConflictException('Only pending top-ups can be simulated');
     }
 
-    const outcome = await this.prisma.$transaction((tx) =>
+    const outcome = await this.prisma.$transaction((tx: Prisma.TransactionClient) =>
       this.claimAndCredit(tx, topUp, `development_${topUp.id}`),
     );
     if (outcome === 'duplicate') {
@@ -341,7 +341,7 @@ export class TopUpsService {
     // FAILED it is a governed reprocessing of money that verifiably arrived.
     const outcome = topUp.status === TopUpStatus.PENDING ? 'charged' : 'reprocessed';
     try {
-      const result = await this.prisma.$transaction((tx) => this.claimAndCredit(tx, topUp, transactionId));
+      const result = await this.prisma.$transaction((tx: Prisma.TransactionClient) => this.claimAndCredit(tx, topUp, transactionId));
       log(result);
     } catch (error) {
       // providerTransactionId is unique: a replay across references cannot
@@ -442,7 +442,7 @@ export class TopUpsService {
             this.logger.warn(`kashier reconcile mismatch ref=${topUp.providerOrderRef} status=${topUp.status}`);
             continue;
           }
-          const outcome = await this.prisma.$transaction((tx) => this.claimAndCredit(tx, topUp, success.transactionId));
+          const outcome = await this.prisma.$transaction((tx: Prisma.TransactionClient) => this.claimAndCredit(tx, topUp, success.transactionId));
           if (outcome !== 'duplicate') {
             charged += 1;
             this.logger.log(`kashier reconcile ${outcome} ref=${topUp.providerOrderRef} status=${topUp.status}`);
