@@ -5,6 +5,7 @@ import { Activity, ArrowRight, ArrowUpRight, Bell, Bike, Boxes, Check, ChevronDo
 import './dashboard.css'
 import { applicationReviewLabel, isDocUploaded } from './labels'
 import TopUpsPage from './TopUpsPage'
+import { API_BASE_URL } from './api-config'
 
 type Order = { id: string; reference: string; status: string; pickupLabel: string; deliveryLabel: string; price: number; createdAt: string; client?: { name: string }; captain?: { id?: string; name: string } | null }
 type Captain = {
@@ -42,7 +43,6 @@ const navigation: { label: string; to: string; icon: typeof Users; stat?: 'openO
   { label: 'Reports', to: '/reports', icon: Activity },
 ]
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'
 const TODAY_LABEL = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase()
 
 // Single source of truth for money in the admin web (the mobile app uses
@@ -67,11 +67,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('wasalny-admin-token')
   let response: Response
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(`${API_BASE_URL}${path}`, {
       ...init, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init?.headers },
     })
   } catch {
-    throw new ApiError(`Cannot reach the API at ${API_BASE} (server down, network issue, or CORS blocked).`, 0)
+    throw new ApiError(`Cannot reach the API at ${API_BASE_URL} (server down, network issue, or CORS blocked).`, 0)
   }
   if (response.status === 401) {
     if (!path.startsWith('/auth/')) handleUnauthorized()
@@ -214,7 +214,7 @@ function useAuthBlobUrl(userId: string, docType: string, uploaded: boolean) {
     let objectUrl: string | null = null
     let cancelled = false
     setState('loading')
-    fetch(`${API_BASE}/admin/captains/${userId}/documents/${docType}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE_URL}/admin/captains/${userId}/documents/${docType}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (response) => {
         if (response.status === 401) { handleUnauthorized(); throw new Error('unauthorized') }
         if (!response.ok) throw new Error(response.status === 404 ? 'missing' : 'failed')
@@ -389,7 +389,7 @@ function SettingsPage() {
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
   const login = useMutation({ mutationFn: () => api<{ accessToken: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }), onSuccess: (data) => { localStorage.setItem('wasalny-admin-token', data.accessToken); window.location.assign('/') }, onError: (error) => setMessage(error.message) })
-  return <><Heading eyebrow="WORKSPACE CONFIGURATION" title="Settings" description="Manage administrator access and service connectivity." /><div className="settings-grid"><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">ADMINISTRATOR ACCESS</div><h2>{token ? 'Connected session' : 'Connect your account'}</h2></div><span className="settings-icon"><ShieldCheck size={18} /></span></div>{token ? <><p className="settings-copy">This browser has an administrator access token.</p><button className="button button-outline" onClick={() => { localStorage.removeItem('wasalny-admin-token'); window.location.reload() }}>Sign out</button></> : <form className="access-form" onSubmit={(event) => { event.preventDefault(); login.mutate() }}><label>Admin email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@wasalny.app" /></label><label>Password<input type="password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label><button className="button button-primary" disabled={login.isPending}>{login.isPending ? 'Connecting…' : 'Connect administrator'}</button>{message && <p className="form-message">{message}</p>}</form>}</section><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">SERVICE STATUS</div><h2>Connected services</h2></div><span className="settings-icon"><Activity size={18} /></span></div><div className="service-list"><div><span><i /> API endpoint</span><code>{import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'}</code></div><div><span><i /> Payment processing</span><small>Ready for Kashier integration</small></div><div><span><i /> Push notifications</span><small>Firebase credentials required</small></div></div></section></div></>
+  return <><Heading eyebrow="WORKSPACE CONFIGURATION" title="Settings" description="Manage administrator access and service connectivity." /><div className="settings-grid"><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">ADMINISTRATOR ACCESS</div><h2>{token ? 'Connected session' : 'Connect your account'}</h2></div><span className="settings-icon"><ShieldCheck size={18} /></span></div>{token ? <><p className="settings-copy">This browser has an administrator access token.</p><button className="button button-outline" onClick={() => { localStorage.removeItem('wasalny-admin-token'); window.location.reload() }}>Sign out</button></> : <form className="access-form" onSubmit={(event) => { event.preventDefault(); login.mutate() }}><label>Admin email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@wasalny.app" /></label><label>Password<input type="password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label><button className="button button-primary" disabled={login.isPending}>{login.isPending ? 'Connecting…' : 'Connect administrator'}</button>{message && <p className="form-message">{message}</p>}</form>}</section><section className="panel settings-panel"><div className="panel-heading"><div><div className="panel-kicker">SERVICE STATUS</div><h2>Connected services</h2></div><span className="settings-icon"><Activity size={18} /></span></div><div className="service-list"><div><span><i /> API endpoint</span><code>{API_BASE_URL}</code></div><div><span><i /> Payment processing</span><small>Ready for Kashier integration</small></div><div><span><i /> Push notifications</span><small>Firebase credentials required</small></div></div></section></div></>
 }
 function AuthPage() {
   const [email, setEmail] = useState('')
@@ -400,6 +400,27 @@ function AuthPage() {
   return <div className="login-shell"><span className="login-mark"><Boxes size={23} /></span><div className="eyebrow">WASALNY ORDERS</div><h1>Administrator sign in</h1><p>Sign in to review captain applications and live operations.</p><form className="access-form login-form" onSubmit={(event) => { event.preventDefault(); login.mutate() }}><label>Admin email<input type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@wasalny.app" /></label><label>Password<input type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label><button className="button button-primary" disabled={login.isPending}>{login.isPending ? 'Signing in…' : 'Sign in'}</button>{message && <p className="form-message">{message}</p>}</form></div>
 }
 
+function AdminAccessGate() {
+  const token = localStorage.getItem('wasalny-admin-token')
+  const access = useQuery<DashboardData, ApiError>({
+    queryKey: ['dashboard'],
+    queryFn: () => api<DashboardData>('/admin/dashboard'),
+    enabled: Boolean(token),
+    retry: false,
+  })
+
+  if (!token || access.error?.status === 401) return <Navigate to="/login" replace />
+  if (access.isPending) return <div className="login-shell"><p>Checking administrator access…</p></div>
+  if (access.error?.status === 403) {
+    return <div className="login-shell"><h1>Administrator access required</h1><p>This account does not have the ADMIN role.</p><button className="button button-primary" onClick={() => { localStorage.removeItem('wasalny-admin-token'); window.location.assign('/login') }}>Return to sign in</button></div>
+  }
+  if (access.error) {
+    return <div className="login-shell"><h1>Could not verify access</h1><p>{access.error.message}</p><button className="button button-primary" onClick={() => access.refetch()}>Retry</button></div>
+  }
+
+  return <Outlet />
+}
+
 export default function Dashboard() {
-  return <Routes><Route path="/login" element={<AuthPage />} /><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="captains/:userId" element={<CaptainReviewPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="topups" element={<TopUpsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<Navigate to="/login" replace />} /></Route></Routes>
+  return <Routes><Route path="/login" element={<AuthPage />} /><Route element={<AdminAccessGate />}><Route element={<Frame />}><Route index element={<Overview />} /><Route path="orders" element={<OrdersPage />} /><Route path="captains" element={<CaptainsPage />} /><Route path="captains/:userId" element={<CaptainReviewPage />} /><Route path="clients" element={<ClientsPage />} /><Route path="wallets" element={<WalletsPage />} /><Route path="topups" element={<TopUpsPage />} /><Route path="reports" element={<ReportsPage />} /><Route path="pricing" element={<PricingPage />} /><Route path="settings" element={<SettingsPage />} /><Route path="*" element={<Navigate to="/login" replace />} /></Route></Route></Routes>
 }

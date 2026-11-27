@@ -40,3 +40,11 @@
 لا تخلط مفاتيح Test مع Live؛ مفاتيح Test تعمل فقط مع hosts الاختبار، ومفاتيح Live تعمل فقط مع hosts الـ Live. الرجوع إلى Test يكون بتغيير متغيرات Railway فقط إلى `https://test-api.kashier.io` ومفاتيح Test، مع إبقاء `.env` المحلي كما هو.
 
 بعد النشر نفّذ شحن مبلغ صغير، وتأكد من وصول webhook واحد فقط، ومن تحديث الرصيد محلياً مرة واحدة فقط، ثم استرداد المبلغ وفق لوحة Kashier.
+
+## Deploy admin on Railway
+
+أنشئ خدمة Railway منفصلة مع **Root Directory** = `apps/admin`. الخدمة static Vite/React، وتستخدم `apps/admin/railway.json`: الأمر `npm install --include=dev --workspaces=false && npm run build` للبناء و`npm start` للتشغيل؛ خادم `sirv` يقدّم `dist` مع SPA fallback ويستمع على `0.0.0.0:$PORT`.
+
+اضبط متغير Railway `VITE_API_URL=https://waslny-orders-production.up.railway.app/api/v1` قبل البناء؛ Vite يضمّنه في bundle وقت build، لذلك أعد النشر عند تغييره. هذا المتغير public فقط، ولا تضع فيه أسراراً أو مفاتيح. القيمة المحلية الافتراضية `http://localhost:3000/api/v1` تعمل في development فقط. واجهة المسارات تتحقق من الوصول عبر `/admin/dashboard` المحمي بـJWT ودور `ADMIN`، والـ API يفرض الحماية نفسه على كل endpoint إداري.
+
+بعد إنشاء خدمة الأدمن، أضف origin العام الخاص بها إلى `CORS_ORIGINS` في خدمة API (أو استخدم `CLIENT_ORIGIN` إذا كان origin واحداً فقط)؛ وإلا سيمنع المتصفح طلبات الأدمن إلى API بسبب CORS.

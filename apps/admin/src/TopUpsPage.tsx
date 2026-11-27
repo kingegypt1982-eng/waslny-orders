@@ -9,8 +9,8 @@ import {
   topUpSummary,
   type TopUpRow,
 } from './topups-view'
+import { API_BASE_URL } from './api-config'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1'
 const CURRENCY = 'EGP'
 const money = (value: unknown) => `${CURRENCY} ${Number(value ?? 0).toFixed(2)}`
 
@@ -20,11 +20,11 @@ async function fetchTopUps(status: string): Promise<TopUpRow[]> {
   const token = localStorage.getItem('wasalny-admin-token')
   let response: Response
   try {
-    response = await fetch(`${API_BASE}${buildTopUpsPath(status)}`, {
+    response = await fetch(`${API_BASE_URL}${buildTopUpsPath(status)}`, {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     })
   } catch {
-    throw new TopUpsApiError(`Cannot reach the API at ${API_BASE}.`)
+    throw new TopUpsApiError(`Cannot reach the API at ${API_BASE_URL}.`)
   }
   if (response.status === 401) {
     localStorage.removeItem('wasalny-admin-token')
