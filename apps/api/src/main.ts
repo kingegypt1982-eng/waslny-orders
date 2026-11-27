@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/http-exception.filter';
 import { assertSecretsAreNotDefaults } from './security/secret-guard';
+import { validateKashierEnvironment } from './topups/kashier-config';
 
 function parseOrigins(value: string | undefined): string[] {
   return (value ?? '').split(',').map((origin) => origin.trim()).filter(Boolean);
@@ -17,19 +18,16 @@ async function bootstrap() {
   // Development may run with the documented placeholders; anything else must
   // use its own JWT_SECRET / ADMIN_PASSWORD.
   assertSecretsAreNotDefaults();
-  // Kashier test integration: all five are mandatory. The per-payment webhook
+  // Kashier integration: all five are mandatory. The per-payment webhook
   // URL may stay empty in local development (serverWebhook is then omitted),
   // but production refuses to boot without it.
-  const KASHIER_TEST_HOST = 'https://test-api.kashier.io';
   const isProduction = process.env.NODE_ENV === 'production';
   for (const key of ['KASHIER_MERCHANT_ID', 'KASHIER_API_KEY', 'KASHIER_SECRET_KEY', 'KASHIER_BASE_URL', 'KASHIER_REDIRECT_URL']) {
-    if (!process.env[key]) throw new Error(`${key} is not set. Refusing to boot without Kashier test credentials.`);
+    if (!process.env[key]) throw new Error(`${key} is not set. Refusing to boot without Kashier credentials.`);
   }
+  validateKashierEnvironment(process.env);
   if (!process.env.KASHIER_WEBHOOK_URL && isProduction) {
     throw new Error('KASHIER_WEBHOOK_URL is not set. Refusing to boot production without a webhook destination.');
-  }
-  if (!isProduction && process.env.KASHIER_BASE_URL !== KASHIER_TEST_HOST) {
-    throw new Error('Refusing non-test Kashier host outside production.');
   }
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api/v1');

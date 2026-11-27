@@ -34,6 +34,7 @@ describe('KashierClient (network mocked)', () => {
     expect(url).toBe('https://test-api.kashier.io/v3/payment/sessions');
     expect(init.method).toBe('POST');
     expect(init.headers).toMatchObject({ Authorization: 'test-secret-key', 'api-key': 'test-payment-api-key' });
+    expect(init.headers).not.toHaveProperty('authmerchantid');
     const body = JSON.parse(init.body as string);
     expect(body).toMatchObject({
       amount: '200.00', currency: 'EGP', order: 'topup_x',
@@ -48,6 +49,20 @@ describe('KashierClient (network mocked)', () => {
     await expect(
       new KashierClient(CONFIG).createSession({ amount: '200.00', currency: 'EGP', orderRef: 'x', description: 'd' }),
     ).rejects.toThrow();
+  });
+
+  it('sends authmerchantid only when the optional merchant ID is configured', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { sessionUrl: 'https://pay.test/s/1', sessionId: 'sess-1' } }),
+    });
+
+    await new KashierClient({ ...CONFIG, authMerchantId: 'MULTI-MERCHANT-ID' }).createSession({
+      amount: '200.00', currency: 'EGP', orderRef: 'topup_x', description: 'd',
+    });
+
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(init.headers).toMatchObject({ authmerchantid: 'MULTI-MERCHANT-ID' });
   });
 
   it('queries transaction status with the secret header only', async () => {

@@ -7,6 +7,7 @@ export interface KashierConfig {
   secretKey: string;
   redirectUrl: string;
   webhookUrl?: string;
+  authMerchantId?: string;
 }
 
 export interface KashierSession {
@@ -22,7 +23,7 @@ export interface KashierPayTransaction {
 }
 
 /**
- * Minimal Kashier test-environment client (no SDK).
+ * Minimal Kashier API client (no SDK).
  * Session creation: https://developers.kashier.io/docs/accept-payments/payment-sessions#step-1-create-a-payment-session
  * Result inquiry:   https://developers.kashier.io/docs/accept-payments/payment-sessions#step-3-verify-the-result
  * Transaction lookup:https://developers.kashier.io/docs/accept-payments/transactions#get-transaction-details
@@ -43,6 +44,7 @@ export class KashierClient {
       secretKey: process.env.KASHIER_SECRET_KEY as string,
       redirectUrl: process.env.KASHIER_REDIRECT_URL as string,
       webhookUrl: process.env.KASHIER_WEBHOOK_URL || undefined,
+      authMerchantId: process.env.KASHIER_AUTH_MERCHANT_ID || undefined,
     });
   }
 
@@ -81,13 +83,15 @@ export class KashierClient {
     // becoming a configured webhook.
     // Docs: https://developers.kashier.io/docs/webhooks#step-2-point-kashier-at-your-endpoint
     if (this.config.webhookUrl) body.serverWebhook = this.config.webhookUrl;
+    const headers: Record<string, string> = {
+      Authorization: this.config.secretKey,
+      'api-key': this.config.apiKey,
+      'Content-Type': 'application/json',
+    };
+    if (this.config.authMerchantId) headers['authmerchantid'] = this.config.authMerchantId;
     const response = await fetch(`${this.config.baseUrl}/v3/payment/sessions`, {
       method: 'POST',
-      headers: {
-        Authorization: this.config.secretKey,
-        'api-key': this.config.apiKey,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
@@ -104,9 +108,11 @@ export class KashierClient {
 
   /** Stored transaction status (SUCCESS / FAILURE / PENDING vocabulary). */
   async getTransactionStatus(transactionId: string): Promise<{ status: string | null }> {
+    const headers: Record<string, string> = { Authorization: this.config.secretKey };
+    if (this.config.authMerchantId) headers['authmerchantid'] = this.config.authMerchantId;
     const response = await fetch(
       `${this.config.baseUrl}/v2/aggregator/transactions/${encodeURIComponent(transactionId)}`,
-      { headers: { Authorization: this.config.secretKey }, signal: AbortSignal.timeout(15_000) },
+      { headers, signal: AbortSignal.timeout(15_000) },
     );
     if (!response.ok) {
       const error = new Error(`Kashier inquiry failed (${response.status})`);
@@ -125,9 +131,11 @@ export class KashierClient {
    * Docs: https://developers.kashier.io/docs/accept-payments/order-reconciliation#retrieve-order-details
    */
   async getOrderByMerchantRef(ref: string): Promise<{ found: boolean; payTransactions: KashierPayTransaction[] }> {
+    const headers: Record<string, string> = { Authorization: this.config.secretKey };
+    if (this.config.authMerchantId) headers['authmerchantid'] = this.config.authMerchantId;
     const response = await fetch(
       `${this.config.baseUrl}/v3/payment/orders?search=${encodeURIComponent(ref)}`,
-      { headers: { Authorization: this.config.secretKey }, signal: AbortSignal.timeout(15_000) },
+      { headers, signal: AbortSignal.timeout(15_000) },
     );
     if (!response.ok) {
       const error = new Error(`Kashier order lookup failed (${response.status})`);

@@ -20,3 +20,23 @@
 `POST /auth/google` لا يربط `googleId` بحساب موجود بنفس البريد إذا كان لهذا الحساب كلمة مرور (`passwordHash`)، ويرفض الطلب بـ `409 EMAIL_USES_PASSWORD_LOGIN` دون كتابة أي شيء ودون إصدار جلسة. السبب: التسجيل لا يتحقق من ملكية البريد، فكان بإمكان طرف ثالث تسجيل بريد الضحية بكلمة مرور ثم ترك الضحية «يربط» Google فيبقى للمهاجم وصول بكلمة المرور (pre-hijacking). تُعرض الرسالة فقط بعد تحقق الخادم من توكن Google (`email_verified`)، فلا تكشف وجود الحساب لأي طرف غير موثّق.
 
 الربط الآمن لاحقًا يتم من داخل الحساب بعد تسجيل الدخول بكلمة المرور (أو أي وسيلة يملكها المستخدم)، أو بعد إضافة تحقق فعلي من ملكية البريد الإلكتروني عند التسجيل؛ حينها يمكن السماح بالربط بثقة. الحسابات التي لا تملك أي وسيلة دخول أخرى (بلا كلمة مرور وبلا `googleId`) تبقى قابلة للربط لأن لا شيء يمكن للمهاجم الاستمرار به.
+
+## Kashier webhook و Railway
+
+مسار الـ webhook الفعلي هو `POST /api/v1/webhooks/kashier` داخل تطبيق API، ويُشغّل من Kashier كـ public endpoint لأن المصادقة تتم بتوقيع HMAC قبل أي معالجة. على Railway اضبط `KASHIER_WEBHOOK_URL` إلى `https://waslny-orders-production.up.railway.app/api/v1/webhooks/kashier` و`KASHIER_REDIRECT_URL` إلى `https://waslny-orders-production.up.railway.app/api/v1/payment-return` للرجوع إلى صفحة عامة تشرح للمستخدم أنه قد يعود للتطبيق. لا تستخدم redirect scheme مثل `myapp://` إلا إذا كان Kashier/مسار الرجوع يثبت دعم deep-link؛ التطبيق Mobile يملك مسار `/payment-redirect` على الواجهة، لكنه لا يحتاج تعديلًا في هذا الإعداد.
+
+## Going live with Kashier
+
+- `NODE_ENV=production`
+- `KASHIER_BASE_URL=https://api.kashier.io`
+- `KASHIER_MERCHANT_ID=<Live merchant ID>`
+- `KASHIER_API_KEY=<Live Payment API Key>`
+- `KASHIER_SECRET_KEY=<Live Secret Key>`
+- `KASHIER_WEBHOOK_URL=https://waslny-orders-production.up.railway.app/api/v1/webhooks/kashier`
+- `KASHIER_REDIRECT_URL=https://waslny-orders-production.up.railway.app/api/v1/payment-return`
+- `KASHIER_AUTH_MERCHANT_ID=<optional multi-merchant ID>`
+- `KASHIER_ALLOW_TEST_IN_PRODUCTION=false`
+
+لا تخلط مفاتيح Test مع Live؛ مفاتيح Test تعمل فقط مع hosts الاختبار، ومفاتيح Live تعمل فقط مع hosts الـ Live. الرجوع إلى Test يكون بتغيير متغيرات Railway فقط إلى `https://test-api.kashier.io` ومفاتيح Test، مع إبقاء `.env` المحلي كما هو.
+
+بعد النشر نفّذ شحن مبلغ صغير، وتأكد من وصول webhook واحد فقط، ومن تحديث الرصيد محلياً مرة واحدة فقط، ثم استرداد المبلغ وفق لوحة Kashier.
