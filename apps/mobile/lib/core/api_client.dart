@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
@@ -47,6 +46,46 @@ final authRevisionProvider = ChangeNotifierProvider<AuthRevision>(
   (ref) => AuthRevision(),
 );
 
+const productionApiBaseUrl =
+    'https://waslny-orders-production.up.railway.app/api/v1';
+
+String resolveApiBaseUrl({
+  required String configuredUrl,
+  required bool isRelease,
+  required bool isWeb,
+}) {
+  final value = configuredUrl.trim();
+  if (value.isNotEmpty) {
+    if (isRelease) {
+      final uri = Uri.tryParse(value);
+      const loopbackHosts = {'localhost', '127.0.0.1', '::1'};
+      if (uri == null ||
+          uri.scheme.toLowerCase() != 'https' ||
+          uri.host.isEmpty ||
+          loopbackHosts.contains(uri.host.toLowerCase()) ||
+          uri.userInfo.isNotEmpty) {
+        throw ArgumentError.value(
+          configuredUrl,
+          'API_BASE_URL',
+          'Release API_BASE_URL must be a non-loopback HTTPS URL.',
+        );
+      }
+    }
+    return _withApiPrefix(value);
+  }
+
+  if (isRelease) return productionApiBaseUrl;
+  if (isWeb) return 'http://localhost:3000/api/v1';
+  return 'http://10.0.2.2:3000/api/v1';
+}
+
+String _withApiPrefix(String value) {
+  final normalized = value.endsWith('/')
+      ? value.substring(0, value.length - 1)
+      : value;
+  return normalized.endsWith('/api/v1') ? normalized : '$normalized/api/v1';
+}
+
 class ApiClient {
   ApiClient(this.preferences)
     : dio = Dio(
@@ -68,7 +107,6 @@ class ApiClient {
           final status = error.response?.statusCode;
           final isAuthCall = error.requestOptions.path.startsWith('/auth/');
           if (status == 401 && !isAuthCall) {
-            // Never log the token or response body; just drop the session.
             preferences.remove('access_token');
             preferences.remove('session_user');
             unauthorizedBus.signal();
@@ -79,35 +117,11 @@ class ApiClient {
     );
   }
 
-  /// Resolves the API base URL, ensuring it includes the global prefix.
-  /// The backend uses a global prefix of 'api/v1', so the base URL must
-  /// end with '/api/v1' for routes like /auth/register to work correctly.
-  ///
-  /// Usage:
-  ///   flutter build apk --dart-define=API_BASE_URL=http://10.0.2.2:3000/api/v1
-  ///   flutter build apk --dart-define=API_BASE_URL=https://api.waslny.com/api/v1
-  static String _resolveBaseUrl() {
-    final envUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: '');
-
-    // If no URL provided via dart-define, use web default or Android emulator default
-    if (envUrl.isEmpty) {
-      if (kIsWeb) {
-        return 'http://localhost:3000/api/v1';
-      }
-      return 'http://10.0.2.2:3000/api/v1';
-    }
-
-    // If URL doesn't end with /api/v1, append it
-    // The backend global prefix is 'api/v1'
-    final normalized = envUrl.endsWith('/')
-        ? envUrl.substring(0, envUrl.length - 1)
-        : envUrl;
-    if (!normalized.endsWith('/api/v1')) {
-      return '$normalized/api/v1';
-    }
-
-    return normalized;
-  }
+  static String _resolveBaseUrl() => resolveApiBaseUrl(
+    configuredUrl: const String.fromEnvironment('API_BASE_URL'),
+    isRelease: kReleaseMode,
+    isWeb: kIsWeb,
+  );
 
   final SharedPreferences preferences;
   final Dio dio;
@@ -183,8 +197,8 @@ class ApiClient {
       final text = message is List
           ? message.join('\n')
           : message is String
-              ? message
-              : '';
+          ? message
+          : '';
       final lower = text.toLowerCase();
 
       if (status == 409) {

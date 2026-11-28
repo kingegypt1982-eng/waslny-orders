@@ -48,3 +48,31 @@
 اضبط متغير Railway `VITE_API_URL=https://waslny-orders-production.up.railway.app/api/v1` قبل البناء؛ Vite يضمّنه في bundle وقت build، لذلك أعد النشر عند تغييره. هذا المتغير public فقط، ولا تضع فيه أسراراً أو مفاتيح. القيمة المحلية الافتراضية `http://localhost:3000/api/v1` تعمل في development فقط. واجهة المسارات تتحقق من الوصول عبر `/admin/dashboard` المحمي بـJWT ودور `ADMIN`، والـ API يفرض الحماية نفسه على كل endpoint إداري.
 
 بعد إنشاء خدمة الأدمن، أضف origin العام الخاص بها إلى `CORS_ORIGINS` في خدمة API (أو استخدم `CLIENT_ORIGIN` إذا كان origin واحداً فقط)؛ وإلا سيمنع المتصفح طلبات الأدمن إلى API بسبب CORS.
+
+## Building and distributing the Android APK
+
+لا تنشئ keystore داخل المستودع. أنشئ واحداً محلياً بقيمك الخاصة، ولا تشارك كلمات المرور:
+
+```sh
+keytool -genkeypair -v -keystore apps/mobile/android/app/upload-keystore.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000
+```
+
+انسخ `apps/mobile/android/key.properties.example` إلى `apps/mobile/android/key.properties`، ثم املأ `storeFile=app/upload-keystore.jks` و`storePassword=<store-password>` و`keyAlias=<key-alias>` و`keyPassword=<key-password>`. الملف وملفات keystore مستثناة من Git؛ بناء release يرفض الإكمال إذا كانت الخصائص أو ملف keystore ناقصة، ولا يستخدم debug signing.
+
+ابنِ APK منفصلاً لكل ABI أو APK شاملاً، مع إمكانية تجاوز عنوان API:
+
+```sh
+cd apps/mobile
+flutter build apk --release --split-per-abi
+flutter build apk --release --dart-define=API_BASE_URL=https://waslny-orders-production.up.railway.app/api/v1
+```
+
+عنوان Railway أعلاه هو الافتراضي للـ release؛ كل override في release يجب أن يكون HTTPS وغير loopback. التطوير يبقى على `localhost` للويب و`10.0.2.2` لمحاكي Android. زد `version` في `pubspec.yaml` عند كل إصدار، خصوصاً `versionCode` بعد علامة `+`. استخدم دائماً keystore وalias نفسيهما للتحديثات اللاحقة؛ فقدانه يمنع تحديث التطبيق المثبت بنفس `applicationId`.
+
+استخرج SHA-1 وSHA-256 من شهادة التوقيع ثم أضفهما إلى إعدادات Android OAuth في Google Cloud/Firebase:
+
+```sh
+keytool -list -v -keystore apps/mobile/android/app/upload-keystore.jks -alias <key-alias>
+```
+
+تحقق يدوياً أن `google-services.json` يطابق تطبيق Android ذي `applicationId` الحالي ومشروع Firebase المقصود. ملف Firebase المحلي الموجود مستثنى من Git؛ لا تضعه أو مفاتيح/كلمات مرور التوقيع في مستودع عام.
