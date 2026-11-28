@@ -19,6 +19,7 @@ describe('Password reset (link-based)', () => {
   const service = new AuthService(
     prisma as unknown as PrismaService,
     jwt as unknown as JwtService,
+  { create: jest.fn().mockResolvedValue(undefined) } as any,
   );
   const pipe = new ValidationPipe({ whitelist: true, transform: true });
 

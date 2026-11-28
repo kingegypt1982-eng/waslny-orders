@@ -26,6 +26,7 @@ describe('Google sign-in', () => {
   const service = new AuthService(
     prisma as unknown as PrismaService,
     jwt as unknown as JwtService,
+  { create: jest.fn().mockResolvedValue(undefined) } as any,
   );
   const pipe = new ValidationPipe({ whitelist: true, transform: true });
   const savedClientId = process.env.GOOGLE_CLIENT_ID;

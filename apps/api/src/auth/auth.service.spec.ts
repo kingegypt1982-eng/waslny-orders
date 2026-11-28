@@ -10,6 +10,7 @@ describe('AuthService', () => {
   const service = new AuthService(
     prisma as unknown as PrismaService,
     jwt as unknown as JwtService,
+  { create: jest.fn().mockResolvedValue(undefined) } as any,
   );
 
   beforeEach(() => jest.clearAllMocks());

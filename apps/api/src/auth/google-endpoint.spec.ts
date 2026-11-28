@@ -29,6 +29,7 @@ describe('POST /auth/google (endpoint)', () => {
   const service = new AuthService(
     prisma as unknown as PrismaService,
     jwt as unknown as JwtService,
+  { create: jest.fn().mockResolvedValue(undefined) } as any,
   );
   const controller = new AuthController(service);
   const pipe = new ValidationPipe({ whitelist: true, transform: true });

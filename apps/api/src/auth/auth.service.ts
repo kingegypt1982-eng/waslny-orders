@@ -4,6 +4,8 @@ import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service';
+import { AdminNotificationType } from '@prisma/client';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { LoginDto } from './dto/login.dto';
@@ -19,7 +21,11 @@ export interface GoogleProfile {
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService, private readonly jwt: JwtService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwt: JwtService,
+    private readonly adminNotifications: AdminNotificationsService,
+  ) {}
 
   async register(input: RegisterDto) {
     if (input.role === 'CAPTAIN' && (!input.vehicleType || !input.vehiclePlate)) {
@@ -44,7 +50,21 @@ export class AuthService {
       },
       select: { id: true, email: true, name: true, role: true },
     });
+    this.notifyNewAccount(user);
     return this.session(user);
+  }
+
+  /** Fire-and-forget: notification failures never affect sign-up. */
+  private notifyNewAccount(account: { id: string; name: string; role: string }) {
+    const captain = account.role === 'CAPTAIN';
+    void this.adminNotifications
+      .create(
+        captain ? AdminNotificationType.CAPTAIN_REGISTERED : AdminNotificationType.CLIENT_REGISTERED,
+        captain ? 'New captain awaiting review' : 'New client registered',
+        `${account.name} signed up as ${captain ? 'a captain' : 'a client'}.`,
+        { role: account.role, userId: account.id },
+      )
+      .catch(() => undefined);
   }
 
   async login(input: LoginDto) {
@@ -132,6 +152,7 @@ export class AuthService {
         },
         select: { id: true, email: true, name: true, role: true },
       });
+      this.notifyNewAccount(account);
     }
     const missing = await this.profileMissing(account.id, account.role);
     return { ...(await this.session(account)), missing };

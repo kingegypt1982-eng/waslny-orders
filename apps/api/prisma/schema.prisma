@@ -82,6 +82,11 @@ enum NotificationType {
   ADMIN
 }
 
+enum AdminNotificationType {
+  CAPTAIN_REGISTERED
+  CLIENT_REGISTERED
+}
+
 enum EventActor {
   ADMIN
   CAPTAIN
@@ -188,6 +193,21 @@ model Notification {
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+}
+
+model AdminNotification {
+  id        String                @id @default(cuid())
+  type      AdminNotificationType
+  title     String
+  body      String
+  // Kept as a plain id: deleting a user must never delete the audit trail.
+  userId    String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime              @default(now())
+
+  @@index([readAt, createdAt])
+  @@index([createdAt])
 }
 
 model PasswordResetToken {

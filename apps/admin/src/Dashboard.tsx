@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, ArrowRight, ArrowUpRight, Bell, Bike, Boxes, Check, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react'
+import { Activity, ArrowRight, ArrowUpRight, Bike, Boxes, Check, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, LayoutDashboard, LifeBuoy, Menu, MoreHorizontal, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react'
 import './dashboard.css'
 import { applicationReviewLabel, isDocUploaded } from './labels'
 import TopUpsPage from './TopUpsPage'
+import NotificationsBell from './NotificationsBell'
 import { API_BASE_URL } from './api-config'
 
 type Order = { id: string; reference: string; status: string; pickupLabel: string; deliveryLabel: string; price: number; createdAt: string; client?: { name: string }; captain?: { id?: string; name: string } | null }
@@ -101,7 +102,7 @@ function Frame() {
     <span className="nav-caption nav-caption-bottom">MANAGE</span><nav className="main-nav"><NavLink to="/pricing" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><CircleDollarSign size={18} /><span>Pricing</span></NavLink><NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><Settings2 size={18} /><span>Settings</span></NavLink></nav>
     <div className="sidebar-bottom"><div className="help-row"><span className="help-icon"><LifeBuoy size={17} /></span><span><strong>Need a hand?</strong><small>Visit the help center</small></span></div><div className="account-row"><span className="account-avatar">AM</span><span><strong>Admin Manager</strong><small>Administrator</small></span><MoreHorizontal size={18} /></div></div>
   </aside>{menuOpen && <button className="mobile-scrim" onClick={() => setMenuOpen(false)} aria-label="Close navigation" />}
-    <main className="main-area"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={19} /></button><span className="breadcrumb">Workspace <span>/</span> <strong>{section}</strong></span></div><div className="topbar-actions"><span className="live-indicator"><i /> All systems operational</span><button className="icon-button notification-button" aria-label="Notifications"><Bell size={18} /><i /></button><span className="topbar-divider" /><button className="top-user" aria-label="Administrator menu"><span className="account-avatar">AM</span><ChevronDown size={14} /></button></div></header><div className="page-content"><Outlet /></div></main>
+    <main className="main-area"><header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={19} /></button><span className="breadcrumb">Workspace <span>/</span> <strong>{section}</strong></span></div><div className="topbar-actions"><span className="live-indicator"><i /> All systems operational</span><NotificationsBell api={api} /><span className="topbar-divider" /><button className="top-user" aria-label="Administrator menu"><span className="account-avatar">AM</span><ChevronDown size={14} /></button></div></header><div className="page-content"><Outlet /></div></main>
   </div>
 }
 function Heading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
@@ -352,13 +353,15 @@ function CaptainsPage() {
 }
 function ClientsPage() {
   const cache = useQueryClient()
+  const location = useLocation()
+  const highlight = (location.state as { highlight?: string } | null)?.highlight
   const clients = useData<Client[]>('clients', '/admin/clients')
   const [actionError, setActionError] = useState('')
   const suspension = useMutation({ mutationFn: ({ id, suspended }: { id: string; suspended: boolean }) => api(`/admin/users/${id}/suspension`, { method: 'PATCH', body: JSON.stringify({ suspended }) }), onSuccess: () => { setActionError(''); cache.invalidateQueries({ queryKey: ['clients'] }) }, onError: (error) => setActionError(error.message) })
   const [search, setSearch] = useState('')
   const editable = Boolean(localStorage.getItem('wasalny-admin-token'))
   const rows = (clients.data ?? []).filter((row) => `${row.name} ${row.email}`.toLowerCase().includes(search.toLowerCase()))
-  return <><Heading eyebrow="CUSTOMER DIRECTORY" title="Clients" description="Manage shipment senders and their account activity." /><QueryError error={clients.error} retry={clients.refetch} /><QueryError error={actionError ? { message: actionError } : null} retry={() => setActionError('')} /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search clients" /><div className="table-scroll"><table><thead><tr><th>CLIENT</th><th>PHONE</th><th>ORDERS</th><th>ACCOUNT</th><th>ACTIONS</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><div className="person-cell"><span className="person-avatar client-avatar">{row.name.slice(0, 2).toUpperCase()}</span><span><strong>{row.name}</strong><small>{row.email}</small></span></div></td><td>{row.phone ?? '—'}</td><td>{row._count?.clientOrders ?? 0}</td><td><Status value={row.suspendedAt ? 'SUSPENDED' : 'ACTIVE'} /></td><td><button className="text-action" disabled={!editable || suspension.isPending} onClick={() => suspension.mutate({ id: row.id, suspended: !row.suspendedAt })}>{row.suspendedAt ? 'Restore' : 'Suspend'}</button></td></tr>)}</tbody></table></div>{!clients.error && rows.length === 0 && <div className="empty-inline">{clients.isPending ? 'Loading…' : 'No clients match this search.'}</div>}</section></>
+  return <><Heading eyebrow="CUSTOMER DIRECTORY" title="Clients" description="Manage shipment senders and their account activity." /><QueryError error={clients.error} retry={clients.refetch} /><QueryError error={actionError ? { message: actionError } : null} retry={() => setActionError('')} /><section className="panel table-panel"><Toolbar value={search} setValue={setSearch} placeholder="Search clients" /><div className="table-scroll"><table><thead><tr><th>CLIENT</th><th>PHONE</th><th>ORDERS</th><th>ACCOUNT</th><th>ACTIONS</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id} className={row.id === highlight ? 'highlight-row' : undefined}><td><div className="person-cell"><span className="person-avatar client-avatar">{row.name.slice(0, 2).toUpperCase()}</span><span><strong>{row.name}</strong><small>{row.email}</small></span></div></td><td>{row.phone ?? '—'}</td><td>{row._count?.clientOrders ?? 0}</td><td><Status value={row.suspendedAt ? 'SUSPENDED' : 'ACTIVE'} /></td><td><button className="text-action" disabled={!editable || suspension.isPending} onClick={() => suspension.mutate({ id: row.id, suspended: !row.suspendedAt })}>{row.suspendedAt ? 'Restore' : 'Suspend'}</button></td></tr>)}</tbody></table></div>{!clients.error && rows.length === 0 && <div className="empty-inline">{clients.isPending ? 'Loading…' : 'No clients match this search.'}</div>}</section></>
 }
 function PricingPage() {
   const cache = useQueryClient()

@@ -16,6 +16,8 @@ import { UpdatePricingDto } from './dto/update-pricing.dto';
 import { AdminTopUpsQueryDto } from '../topups/dto/admin-topups-query.dto';
 import { AdminAcknowledgementsQueryDto } from './dto/admin-acknowledgements-query.dto';
 import { AdminService } from './admin.service';
+import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service';
+import { AdminNotificationsQueryDto } from './dto/admin-notifications-query.dto';
 
 class SuspendDto { @IsBoolean() suspended: boolean; }
 
@@ -25,7 +27,10 @@ class SuspendDto { @IsBoolean() suspended: boolean; }
 @Roles('ADMIN')
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly adminNotifications: AdminNotificationsService,
+  ) {}
 
   @Get('dashboard') dashboard() { return this.admin.dashboard(); }
   @Get('orders') orders(@Query() query: AdminOrdersQueryDto) { return this.admin.orders(query); }
@@ -59,6 +64,20 @@ export class AdminController {
   @Post('captains/:userId/reject') reject(@Param('userId') id: string, @Body() body: AdminCaptainRejectDto) { return this.admin.reviewCaptain(id, CaptainStatus.REJECTED, body.reason); }
   @Post('captains/:userId/suspend') suspendCaptain(@Param('userId') id: string) { return this.admin.reviewCaptain(id, CaptainStatus.SUSPENDED); }
   @Post('captains/:userId/unsuspend') unsuspendCaptain(@Param('userId') id: string) { return this.admin.reviewCaptain(id, CaptainStatus.ACTIVE); }
+  @Get('notifications')
+  notifications(@Query() query: AdminNotificationsQueryDto) {
+    return this.adminNotifications.list({
+      limit: query.limit,
+      cursor: query.cursor,
+      unreadOnly: query.unreadOnly === 'true',
+    });
+  }
+  @Patch('notifications/:id/read') markNotificationRead(@Param('id') id: string) {
+    return this.adminNotifications.markRead(id);
+  }
+  @Post('notifications/read-all') markAllNotificationsRead() {
+    return this.adminNotifications.markAllRead();
+  }
   @Get('clients') clients() { return this.admin.clients(); }
   @Get('wallets') wallets() { return this.admin.wallets(); }
   @Get('transactions') transactions(@Query() query: AdminTransactionsQueryDto) { return this.admin.transactions(query); }
